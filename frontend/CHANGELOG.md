@@ -1,0 +1,38 @@
+# Changelog
+
+## [0.2.0](https://github.com/SoroLabs/SoroTask/compare/frontend-v0.1.0...frontend-v0.2.0) (2026-04-28)
+
+
+### Features
+
+* add accessible drag-and-drop task board ([880653f](https://github.com/SoroLabs/SoroTask/commit/880653f7368ea9cb1789223d0c5abb0ba248896d))
+* Add mentions and inline entity suggestions ([f38c440](https://github.com/SoroLabs/SoroTask/commit/f38c4408029bce75ff9fcc495b19a7920e2e3d71))
+* add multi-provider auth UI with unified session UX ([172bb3c](https://github.com/SoroLabs/SoroTask/commit/172bb3c8a09d593021a7345a1368496184d4d48e))
+* add reusable transaction status component ([2ac0fd8](https://github.com/SoroLabs/SoroTask/commit/2ac0fd819a9746a6fd525d9e3555966b2bd7a0c5))
+* Add split-pane task detail experience with resizable panels ([78f674d](https://github.com/SoroLabs/SoroTask/commit/78f674dfe3e91b686f1827f56787df0f1ca9e19d))
+* add task dependency relationships ([3bcb59e](https://github.com/SoroLabs/SoroTask/commit/3bcb59eafb61cf50cfe69abd3747a5df57632745))
+* Add version history and visual diff experience for task changes ([4b5bff0](https://github.com/SoroLabs/SoroTask/commit/4b5bff010b1e19454715e79528328f7ac8744bd0))
+* **frontend:** add advanced search, filter, and saved views system ([ffc0e6a](https://github.com/SoroLabs/SoroTask/commit/ffc0e6a13b18f61e0a68c429553222a3949ce798))
+* **frontend:** add error boundaries to prevent full-app crashes ([038f850](https://github.com/SoroLabs/SoroTask/commit/038f850e3d789509ce945f6b6d0054eb370d7e1c))
+* **frontend:** add lightweight performance monitoring for core interactions ([#214](https://github.com/SoroLabs/SoroTask/issues/214)) ([4bbbde5](https://github.com/SoroLabs/SoroTask/commit/4bbbde500ed0d1e715b6f733425fca330976f847))
+* **frontend:** add secure sharing flow for external task/project access ([4ab3c66](https://github.com/SoroLabs/SoroTask/commit/4ab3c66a82bfa9c5183a2085cb386cd4bc7807f3))
+* **frontend:** build reusable accessible dialog and overlay system ([41a5429](https://github.com/SoroLabs/SoroTask/commit/41a5429a7ec6bbb7e1816e1844482ded0f6e535b))
+* **frontend:** implement dynamic custom fields for task create/edit/detail flows ([#200](https://github.com/SoroLabs/SoroTask/issues/200)) ([a6792af](https://github.com/SoroLabs/SoroTask/commit/a6792af92343f83d9fc73267333bd863d65aa01b))
+* **frontend:** implement full keyboard navigation for core user flows ([#165](https://github.com/SoroLabs/SoroTask/issues/165)) ([f790700](https://github.com/SoroLabs/SoroTask/commit/f790700b226bf92081a51d8b4ee99fd467353e1d))
+* **frontend:** implement Soroban transaction signing and pending state UX ([#191](https://github.com/SoroLabs/SoroTask/issues/191)) ([120b0db](https://github.com/SoroLabs/SoroTask/commit/120b0db1bd1914055c572f62d2104f64df43e41f))
+* **frontend:** implement unsaved changes protection ([#210](https://github.com/SoroLabs/SoroTask/issues/210)) ([04767e8](https://github.com/SoroLabs/SoroTask/commit/04767e8ff3c58e7b8098d2ad879227dab56a7af5))
+* **frontend:** protect unsaved task and settings edits ([b3caa9f](https://github.com/SoroLabs/SoroTask/commit/b3caa9ff6b0f2d50b3d8a2c406f5dca44af6916c))
+* **frontend:** rich text editor for task descriptions ([ef9d9d7](https://github.com/SoroLabs/SoroTask/commit/ef9d9d72ef6d2c1a2865eba06cc00c52254c6029))
+* **frontend:** rich text editor for task descriptions ([70dc14a](https://github.com/SoroLabs/SoroTask/commit/70dc14a76567199474a37b772efdb76773a08bdb))
+* **frontend:** rich text editor, virtualized task list, and global state ([fbb1165](https://github.com/SoroLabs/SoroTask/commit/fbb11656d3fee380cf6c7c432bf241004ede5074))
+* **frontend:** task dependency graph visualization ([f10bf7f](https://github.com/SoroLabs/SoroTask/commit/f10bf7f227beab1e38a83c530f60b20be9326443))
+* implement global command palette ([#184](https://github.com/SoroLabs/SoroTask/issues/184)) ([467c6cf](https://github.com/SoroLabs/SoroTask/commit/467c6cf5315165365294719ca4afdb1220557f40))
+* implement multi-provider authentication with unified frontend session UX ([32cfa8b](https://github.com/SoroLabs/SoroTask/commit/32cfa8bdc8196b0348fcdef438b513a488a4ddc0))
+* implement task state management, socket integration, and operational metrics tracking ([7fd71fc](https://github.com/SoroLabs/SoroTask/commit/7fd71fcabe40e2f5d48c5b5f78274d02c845aa59))
+* Implement time tracking feature with manual entry and active timer ([b3f4171](https://github.com/SoroLabs/SoroTask/commit/b3f41710e8886fa63edb42b0b85bf5315f452def))
+* improve responsive board layout ([aca5887](https://github.com/SoroLabs/SoroTask/commit/aca58872109b08d4ebe7df9a543762a79b6a5967))
+* optimize bundle splitting and route-based lazy loading ([4f942a9](https://github.com/SoroLabs/SoroTask/commit/4f942a9c83b30ccecd368c10a3da9ae01ec169b4))
+* refactor global state with zustand ([#160](https://github.com/SoroLabs/SoroTask/issues/160)) ([f20a948](https://github.com/SoroLabs/SoroTask/commit/f20a9484ea3fcfca1356f4fdf873b491f68b0153))
+* **testing:** add ommitted package.json ([f3cb01e](https://github.com/SoroLabs/SoroTask/commit/f3cb01e1cac0bee68dddc7f22f6c7f7acf9d96f9))
+* **testing:** implement code coverage reporting with Codecov ([61cf687](https://github.com/SoroLabs/SoroTask/commit/61cf687806ae2e62e6713c14c3b66bfcf5a44b2a)), closes [#114](https://github.com/SoroLabs/SoroTask/issues/114)
+* **theme:** add light, dark, and system preference theme support ([997cb42](https://github.com/SoroLabs/SoroTask/commit/997cb42df3f1359408219f1cd6a64e34ed707c1d))
