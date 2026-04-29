@@ -67,10 +67,25 @@ LOG_LEVEL=info
 # KEEPER_STATE_DIR=./data
 # IDEMPOTENCY_STATE_FILE=./data/execution_locks.json
 
-# Optional: lock expiration controls (milliseconds)
-# EXECUTION_LOCK_TTL_MS=120000
-# EXECUTION_COMPLETED_MARKER_TTL_MS=30000
-```
+ # Optional: lock expiration controls (milliseconds)
+ # EXECUTION_LOCK_TTL_MS=120000
+ # EXECUTION_COMPLETED_MARKER_TTL_MS=30000
+
+ # === SLO (Service Level Objectives) ===
+ # Maximum allowed milliseconds between poll cycle completions (freshness)
+ # SLO_POLL_FRESHNESS_MS=60000
+
+ # Maximum allowed execution lateness in milliseconds.
+ # If not set, defaults to 3x the polling interval.
+ # SLO_EXECUTION_TIMELINESS_MS=30000
+
+ # Approximate wall-clock time per ledger in milliseconds.
+ # Used to convert ledger-based timeliness measurements to wall-clock.
+ # LEDGER_TIME_MS=5000
+
+ # Maximum number of retry tasks to process each cycle (fair scheduling)
+ # MAX_RETRIES_PER_CYCLE=5
+ ```
 
 ### Explanation of Variables:
 
@@ -87,8 +102,13 @@ LOG_LEVEL=info
 - **`LOG_LEVEL`**: Minimum log severity to emit (`trace`, `debug`, `info`, `warn`, `error`, `fatal`).
 - **`LOG_FORMAT`**: Optional log renderer. Leave unset for JSON logs; set to `pretty` for local human-readable output.
 - **`KEEPER_STATE_DIR` / `IDEMPOTENCY_STATE_FILE`**: Location of persisted execution idempotency locks used to prevent duplicate submissions.
-- **`EXECUTION_LOCK_TTL_MS`**: How long an in-progress execution lock is considered valid before stale recovery allows new work.
-- **`EXECUTION_COMPLETED_MARKER_TTL_MS`**: Short-lived post-success marker to reduce accidental immediate duplicate submissions.
+ - **`EXECUTION_LOCK_TTL_MS`**: How long an in-progress execution lock is considered valid before stale recovery allows new work.
+ - **`EXECUTION_COMPLETED_MARKER_TTL_MS`**: Short-lived post-success marker to reduce accidental immediate duplicate submissions.
+
+ - **`SLO_POLL_FRESHNESS_MS`**: Maximum allowed milliseconds between poll cycle completions. A poll taking longer than this increments the freshness SLO failure counter.
+ - **`SLO_EXECUTION_TIMELINESS_MS`**: Maximum allowed execution lateness (ms). Tasks completing after this delay count as timeliness SLO failures. Defaults to 3 × `POLLING_INTERVAL_MS`.
+ - **`LEDGER_TIME_MS`**: Estimated wall-clock milliseconds per ledger closure. Used to convert ledger-based lateness to milliseconds for SLO evaluation (default: 5000).
+ - **`MAX_RETRIES_PER_CYCLE`**: Maximum number of retry tasks to process in a single cycle (fair scheduling). Default: 5.
 
 ### Dead-Letter Queue Configuration
 

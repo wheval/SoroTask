@@ -12,6 +12,9 @@ const { dryRunTask } = require("./src/dryRun");
 const { executeTaskWithRetry } = require("./src/executor");
 const { ExecutionIdempotencyGuard } = require("./src/idempotency");
 const { StartupValidator } = require("./src/validator");
+const { MetricsServer } = require("./src/metrics");
+const { GasMonitor } = require("./src/gasMonitor");
+const { RetryScheduler } = require("./src/retryScheduler");
 
 // Create root logger for the main module
 const logger = createLogger("keeper");
@@ -66,20 +69,44 @@ async function main() {
     process.exit(1);
   }
 
-  const idempotencyGuard = new ExecutionIdempotencyGuard({
-    logger: createLogger("idempotency"),
-  });
+   const idempotencyGuard = new ExecutionIdempotencyGuard({
+     logger: createLogger("idempotency"),
+   });
 
-  // Initialize polling engine with logger
-  const poller = new TaskPoller(server, config.contractId, {
-    maxConcurrentReads: process.env.MAX_CONCURRENT_READS,
-    logger: createLogger("poller"),
-  });
-  logger.info("Poller initialized", { contractId: config.contractId });
+   // Initialize retry scheduler
+   const retryScheduler = new RetryScheduler();
+   await retryScheduler.initialize();
 
-  // Initialize execution queue
-  const queue = new ExecutionQueue(undefined, undefined, { idempotencyGuard });
-  const queueLogger = createLogger("queue");
+   // Initialize gas monitor
+   const gasMonitor = new GasMonitor(createLogger("gasMonitor"));
+
+   // Initialize metrics server
+   const metricsServer = new MetricsServer(gasMonitor, createLogger("metrics"));
+   metricsServer.setRegistry(null); // No registry needed for SLO metrics
+   metricsServer.start();
+
+   // Set SLO thresholds from config
+   metricsServer.metrics.setPollIntervalMs(config.pollIntervalMs);
+   metricsServer.metrics.setSloThreshold('pollFreshness', config.sloPollFreshnessMs);
+   metricsServer.metrics.setSloThreshold('executionTimeliness', config.sloExecutionTimelinessMs);
+
+   // Initialize polling engine with logger
+   const poller = new TaskPoller(server, config.contractId, {
+     maxConcurrentReads: process.env.MAX_CONCURRENT_READS,
+     logger: createLogger("poller"),
+     metricsServer,
+   });
+   logger.info("Poller initialized", { contractId: config.contractId });
+
+   // Initialize execution queue with retry scheduler and metrics
+    const queue = new ExecutionQueue(undefined, metricsServer, {
+      idempotencyGuard,
+      retryScheduler,
+    });
+    const queueLogger = createLogger("queue");
+
+    // Initialize queue (load retry scheduler state)
+    await queue.initialize();
 
   queue.on("task:started", (taskId, context) =>
     queueLogger.info("Started execution", {
@@ -127,16 +154,19 @@ async function main() {
       return;
     }
 
-    try {
-      const retryResult = await executeTaskWithRetry(taskId, deps, {
-        attemptId: context.attemptId,
-        logger,
-        onRetry: (_error, _attempt, _delay, retryContext) => {
-          idempotencyGuard.touchRetry(taskId, {
-            lastError: retryContext?.message || null,
-          });
-        },
-      });
+     try {
+       const retryResult = await executeTaskWithRetry(taskId, deps, {
+         attemptId: context.attemptId,
+         logger,
+         onRetry: (_error, _attempt, _delay, retryContext) => {
+           idempotencyGuard.touchRetry(taskId, {
+             lastError: retryContext?.message || null,
+           });
+           if (metricsServer) {
+             metricsServer.recordRetryDelay(_delay);
+           }
+         },
+       });
 
       logger.info("Task execution completed", {
         taskId,
@@ -169,68 +199,85 @@ async function main() {
   const pollingIntervalMs = config.pollIntervalMs;
   logger.info("Starting polling loop", { intervalMs: pollingIntervalMs });
 
-  const pollingInterval = setInterval(async () => {
-    try {
-      logger.info("Starting new polling cycle");
+   const pollingInterval = setInterval(async () => {
+     try {
+       logger.info("Starting new polling cycle");
 
-      // Poll for new TaskRegistered events
-      await registry.poll();
+       // Poll for new TaskRegistered events
+       await registry.poll();
 
-      // Get list of all registered task IDs
-      const taskIds = registry.getTaskIds();
-      logger.info("Checking tasks", { taskCount: taskIds.length });
+       // Get list of all registered task IDs
+       const taskIds = registry.getTaskIds();
+       logger.info("Checking tasks", { taskCount: taskIds.length });
 
-      // Poll for due tasks
-      const dueTaskIds = await poller.pollDueTasks(taskIds);
+       // Poll for due tasks
+       const dueTaskIds = await poller.pollDueTasks(taskIds);
 
-      if (dueTaskIds.length > 0) {
-        const lockSnapshot = idempotencyGuard.getSnapshot();
-        logger.info("Found due tasks, enqueueing for execution", {
-          dueCount: dueTaskIds.length,
-        });
-        logger.info("Execution idempotency state", {
-          stateFile: lockSnapshot.stateFile,
-          activeLocks: lockSnapshot.lockCount,
-        });
-        await queue.enqueue(dueTaskIds, executeTask);
-      } else {
-        logger.info("No tasks due for execution");
+       // Update oldest task age metric
+       if (metricsServer) {
+         const tasksWithStats = registry.getTasksWithStats();
+         const nowLedger = await server.getLatestLedger();
+         let oldestAgeSec = 0;
+         if (tasksWithStats.length > 0) {
+           oldestAgeSec = Math.max(...tasksWithStats.map(t => {
+             const lastRun = t.last_run || 0;
+             return nowLedger.sequence - lastRun;
+           }));
+         }
+         metricsServer.setOldestTaskAge(oldestAgeSec);
+       }
+
+       // Process retries and due tasks in parallel
+       const readyRetries = queue.getReadyRetries(parseInt(process.env.MAX_RETRIES_PER_CYCLE || '5', 10));
+       await Promise.all([
+         queue.enqueueRetries(readyRetries, executeTask),
+         queue.enqueue(poller.getLastDueTaskDetails(), executeTask),
+       ]);
+
+       // Record poll cycle completion for freshness SLO
+       const cycleTime = poller.getCycleInsights().cycleDurationMs || config.pollIntervalMs;
+       metricsServer.recordPollCycle(cycleTime, config.pollIntervalMs);
+
+       logger.info("Polling cycle complete");
+     } catch (error) {
+       logger.error("Error in polling cycle", { error: error.message });
+     }
+   }, pollingIntervalMs);
+
+   // Graceful shutdown handling
+   const shutdown = async (signal) => {
+     logger.info("Received shutdown signal, starting graceful shutdown", {
+       signal,
+     });
+     clearInterval(pollingInterval);
+     await queue.drain();
+     await retryScheduler.shutdown();
+     await metricsServer.stop();
+     logger.info("Graceful shutdown complete, exiting");
+     process.exit(0);
+   };
+
+   process.on("SIGTERM", () => shutdown("SIGTERM"));
+   process.on("SIGINT", () => shutdown("SIGINT"));
+
+    // Run first poll immediately
+    logger.info("Running initial poll");
+    setTimeout(async () => {
+      try {
+        const taskIds = registry.getTaskIds();
+        await poller.pollDueTasks(taskIds);
+        const readyRetries = queue.getReadyRetries(parseInt(process.env.MAX_RETRIES_PER_CYCLE || '5', 10));
+        await Promise.all([
+          queue.enqueueRetries(readyRetries, executeTask),
+          queue.enqueue(poller.getLastDueTaskDetails(), executeTask),
+        ]);
+        const cycleTime = poller.getCycleInsights().cycleDurationMs || config.pollIntervalMs;
+        metricsServer.recordPollCycle(cycleTime, config.pollIntervalMs);
+      } catch (error) {
+        logger.error("Error in initial poll", { error: error.message });
       }
-
-      logger.info("Polling cycle complete");
-    } catch (error) {
-      logger.error("Error in polling cycle", { error: error.message });
-    }
-  }, pollingIntervalMs);
-
-  // Graceful shutdown handling
-  const shutdown = async (signal) => {
-    logger.info("Received shutdown signal, starting graceful shutdown", {
-      signal,
-    });
-    clearInterval(pollingInterval);
-    await queue.drain();
-    logger.info("Graceful shutdown complete, exiting");
-    process.exit(0);
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
-
-  // Run first poll immediately
-  logger.info("Running initial poll");
-  setTimeout(async () => {
-    try {
-      const taskIds = registry.getTaskIds();
-      const dueTaskIds = await poller.pollDueTasks(taskIds);
-      if (dueTaskIds.length > 0) {
-        await queue.enqueue(dueTaskIds, executeTask);
-      }
-    } catch (error) {
-      logger.error("Error in initial poll", { error: error.message });
-    }
-  }, 1000);
-}
+    }, 1000);
+  }
 
 main().catch((err) => {
   logger.fatal("Fatal Keeper Error", { error: err.message, stack: err.stack });

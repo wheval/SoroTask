@@ -8,56 +8,59 @@ const { createLogger } = require('./logger');
  * based on last_run + interval <= current_ledger_timestamp.
  */
 class TaskPoller {
-  constructor(server, contractId, options = {}) {
-    this.server = server;
-    this.contractId = contractId;
+   constructor(server, contractId, options = {}) {
+     this.server = server;
+     this.contractId = contractId;
 
-    // Structured logger for poller module
-    this.logger = options.logger || createLogger('poller');
-    this.metricsServer = options.metricsServer;
+     // Structured logger for poller module
+     this.logger = options.logger || createLogger('poller');
+     this.metricsServer = options.metricsServer;
 
-    // Configuration with defaults
-    this.maxConcurrentReads = parseInt(
-      options.maxConcurrentReads || process.env.MAX_CONCURRENT_READS || 10,
-      10,
-    );
-    this.maxReadsPerSecond = parseInt(
-      options.maxReadsPerSecond || process.env.MAX_READS_PER_SECOND || 20,
-      10,
-    );
+     // Configuration with defaults
+     this.maxConcurrentReads = parseInt(
+       options.maxConcurrentReads || process.env.MAX_CONCURRENT_READS || 10,
+       10,
+     );
+     this.maxReadsPerSecond = parseInt(
+       options.maxReadsPerSecond || process.env.MAX_READS_PER_SECOND || 20,
+       10,
+     );
 
-    // Create rate limiter for parallel task reads
-    this.readLimit = createRateLimiter({
-      concurrency: this.maxConcurrentReads,
-      rps: this.maxReadsPerSecond,
-      logger: this.logger,
-      name: 'poller-reads',
-      onThrottle: (event) => {
-        if (this.metricsServer) {
-          this.metricsServer.increment('throttledRequestsTotal', { name: event.name });
-        }
-      },
-    });
+     // Create rate limiter for parallel task reads
+     this.readLimit = createRateLimiter({
+       concurrency: this.maxConcurrentReads,
+       rps: this.maxReadsPerSecond,
+       logger: this.logger,
+       name: 'poller-reads',
+       onThrottle: (event) => {
+         if (this.metricsServer) {
+           this.metricsServer.increment('throttledRequestsTotal', { name: event.name });
+         }
+       },
+     });
 
-    // Statistics
-    this.stats = {
-      lastPollTime: null,
-      tasksChecked: 0,
-      tasksDue: 0,
-      tasksSkipped: 0,
-      errors: 0,
-    };
+     // Statistics
+     this.stats = {
+       lastPollTime: null,
+       tasksChecked: 0,
+       tasksDue: 0,
+       tasksSkipped: 0,
+       errors: 0,
+     };
 
-    this.lastCycleInsights = {
-      backlogSize: 0,
-      dueCount: 0,
-      dueSoonCount: 0,
-      minSecondsUntilDue: null,
-      avgRpcLatencyMs: 0,
-      cycleDurationMs: 0,
-      errors: 0,
-    };
-  }
+     this.lastCycleInsights = {
+       backlogSize: 0,
+       dueCount: 0,
+       dueSoonCount: 0,
+       minSecondsUntilDue: null,
+       avgRpcLatencyMs: 0,
+       cycleDurationMs: 0,
+       errors: 0,
+     };
+
+     // Track last due task details for metrics
+     this.lastDueTaskDetails = []; // Array of { taskId, dueLedger }
+   }
 
   /**
      * Poll the contract for all registered tasks and determine which are due for execution.
@@ -73,6 +76,11 @@ class TaskPoller {
     this.stats.tasksDue = 0;
     this.stats.tasksSkipped = 0;
     this.stats.errors = 0;
+
+    // Notify metrics that poll cycle started (for health staleness)
+    if (this.metricsServer) {
+      this.metricsServer.updateHealth({ lastPollAt: new Date(startTime) });
+    }
 
     const rpcLatencies = [];
     const secondsUntilDueValues = [];
@@ -114,13 +122,15 @@ class TaskPoller {
 
       // Collect due task IDs from successful checks
       const dueTaskIds = [];
+      const dueTaskDetails = []; // Track due ledger for each task
 
       results.forEach((result, index) => {
         if (result.status === 'fulfilled' && result.value) {
-          const { isDue, taskId, reason } = result.value;
+          const { isDue, taskId, reason, nextRunTime } = result.value;
 
           if (isDue) {
             dueTaskIds.push(taskId);
+            dueTaskDetails.push({ taskId, dueLedger: nextRunTime });
             this.stats.tasksDue++;
           } else if (reason === 'skipped') {
             this.stats.tasksSkipped++;
@@ -155,6 +165,9 @@ class TaskPoller {
         errors: this.stats.errors,
       };
 
+      // Store due task details for metrics and observers
+      this.lastDueTaskDetails = dueTaskDetails;
+
       this.logPollSummary(duration);
 
       return dueTaskIds;
@@ -167,12 +180,12 @@ class TaskPoller {
   }
 
   /**
-     * Check a single task to determine if it's due for execution.
-     *
-     * @param {number} taskId - The task ID to check
-     * @param {number} currentTimestamp - Current ledger timestamp
-     * @returns {Promise<{isDue: boolean, taskId: number, reason?: string}>}
-     */
+      * Check a single task to determine if it's due for execution.
+      *
+      * @param {number} taskId - The task ID to check
+      * @param {number} currentTimestamp - Current ledger timestamp
+      * @returns {Promise<{isDue: boolean, taskId: number, reason?: string, secondsUntilDue: number|null, nextRunTime: number|null}>}
+      */
   async checkTask(taskId, currentTimestamp, registry) {
     try {
       // Read task configuration from contract using view call
@@ -180,7 +193,7 @@ class TaskPoller {
 
       if (!taskConfig) {
         this.logger.warn('Task not found (may have been deregistered)', { taskId });
-        return { isDue: false, taskId, reason: 'not_found' };
+        return { isDue: false, taskId, reason: 'not_found', secondsUntilDue: null, nextRunTime: null };
       }
 
       // Update registry with latest task details
@@ -191,7 +204,7 @@ class TaskPoller {
       // Check gas balance
       if (taskConfig.gas_balance <= 0) {
         this.logger.warn('Task has insufficient gas balance', { taskId, gasBalance: taskConfig.gas_balance });
-        return { isDue: false, taskId, reason: 'skipped' };
+        return { isDue: false, taskId, reason: 'skipped', secondsUntilDue: null, nextRunTime: null };
       }
 
       // Calculate if task is due: last_run + interval <= currentTimestamp
@@ -214,6 +227,7 @@ class TaskPoller {
         secondsUntilDue: Number.isFinite(nextRunTime)
           ? Math.max(0, nextRunTime - currentTimestamp)
           : null,
+        nextRunTime,
       };
 
     } catch (error) {
@@ -404,16 +418,26 @@ class TaskPoller {
   }
 
   /**
-   * Get current polling statistics.
-   *
-   * @returns {Object} Current statistics
-   */
+    * Get current polling statistics.
+    *
+    * @returns {Object} Current statistics
+    */
   getStats() {
     return { ...this.stats };
   }
 
   getCycleInsights() {
     return { ...this.lastCycleInsights };
+  }
+
+  /**
+    * Get details of tasks identified as due in the most recent poll.
+    * Includes scheduled due ledger for each task.
+    *
+    * @returns {Array<{taskId: number, dueLedger: number}>}
+    */
+  getLastDueTaskDetails() {
+    return [...this.lastDueTaskDetails];
   }
 }
 

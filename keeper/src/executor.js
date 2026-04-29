@@ -35,18 +35,21 @@ async function pollTransaction(server, txHash) {
               ?.totalNonRefundableResourceFeeCharged?.(),
           ) || 0
         : 0;
-      return { status: "SUCCESS", feePaid };
+      // Extract ledger and close time if available
+      const ledger = response.latestLedger || response.ledger || null;
+      const closeTime = response.latestLedgerCloseTime || response.closeTime || null;
+      return { status: "SUCCESS", feePaid, ledger, closeTime };
     }
 
     if (response.status === SorobanRpc.GetTransactionStatus.FAILED) {
-      return { status: "FAILED", feePaid: 0 };
+      return { status: "FAILED", feePaid: 0, ledger: null, closeTime: null };
     }
 
     // NOT_FOUND means still pending — wait and retry
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
-  return { status: "TIMEOUT", feePaid: 0 };
+  return { status: "TIMEOUT", feePaid: 0, ledger: null, closeTime: null };
 }
 
 function normalizeSubmissionError(error, fallbackCode) {
@@ -142,7 +145,7 @@ async function executeTaskOnce(
     );
   }
 
-  const { status, feePaid } = await pollTransaction(server, sendResult.hash);
+  const { status, feePaid, ledger, closeTime } = await pollTransaction(server, sendResult.hash);
   if (status === "FAILED") {
     throw Object.assign(new Error("Transaction reached FAILED status"), {
       code: "TX_FAILED",
@@ -154,7 +157,7 @@ async function executeTaskOnce(
     });
   }
 
-  return { taskId, txHash, status, feePaid, error: null };
+  return { taskId, txHash, status, feePaid, ledger, closeTime, error: null };
 }
 
 /**
@@ -167,19 +170,21 @@ async function executeTaskOnce(
  * @param {import('@stellar/stellar-sdk').Account} deps.account  - fresh Account for sequence tracking
  * @param {string} deps.contractId
  * @param {string} deps.networkPassphrase
- * @returns {Promise<{taskId, txHash: string|null, status: string, feePaid: number, error: string|null}>}
+ * @returns {Promise<{taskId, txHash: string|null, status: string, feePaid: number, error: string|null, ledger: number|null, closeTime: number|null}>}
  */
 async function executeTask(
   taskId,
   { server, keypair, account, contractId, networkPassphrase },
 ) {
-  /** @type {{taskId, txHash: string|null, status: string, feePaid: number, error: string|null}} */
+  /** @type {{taskId, txHash: string|null, status: string, feePaid: number, error: string|null, ledger: number|null, closeTime: number|null}} */
   const result = {
     taskId,
     txHash: null,
     status: "PENDING",
     feePaid: 0,
     error: null,
+    ledger: null,
+    closeTime: null,
   };
 
   try {
@@ -193,12 +198,15 @@ async function executeTask(
     result.txHash = executionResult.txHash;
     result.status = executionResult.status;
     result.feePaid = executionResult.feePaid;
+    result.ledger = executionResult.ledger;
+    result.closeTime = executionResult.closeTime;
 
     logger.info("Transaction finalised", {
       taskId,
       txHash: result.txHash,
       status,
       feePaid,
+      ledger: result.ledger,
     });
   } catch (err) {
     result.status = "FAILED";
