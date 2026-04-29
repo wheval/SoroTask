@@ -122,6 +122,10 @@ class MetricsServer {
     this.registry = registry;
   }
 
+  setReconciler(reconciler) {
+    this.reconciler = reconciler;
+  }
+
   initPrometheusMetrics() {
     // Counter: Total tasks checked
     this.promTasksChecked = new promClient.Counter({
@@ -287,7 +291,7 @@ class MetricsServer {
     this.server = http.createServer((req, res) => {
       // CORS headers for initial development
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
       if (req.method === 'OPTIONS') {
@@ -304,6 +308,12 @@ class MetricsServer {
         this.handlePrometheusMetrics(res);
       } else if (req.url === '/metrics/forecast' || req.url === '/metrics/forecast/') {
         this.handleForecast(res);
+      } else if (req.url === '/reconcile' || req.url === '/reconcile/') {
+        if (req.method === 'POST') {
+          this.handleReconcileTrigger(res);
+        } else {
+          this.handleReconcileStatus(res);
+        }
       } else {
         res.writeHead(404);
         res.end('Not Found');
@@ -478,6 +488,50 @@ class MetricsServer {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Internal Server Error' }));
     }
+  }
+
+  /**
+   * GET /reconcile — return the most recent reconciliation report, or a
+   * 204 No Content when no reconciliation has run yet.
+   */
+  handleReconcileStatus(res) {
+    if (!this.reconciler) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Reconciler not initialised' }));
+      return;
+    }
+
+    const report = this.reconciler.getLastReport();
+    if (!report) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(report, null, 2));
+  }
+
+  /**
+   * POST /reconcile — trigger an immediate reconciliation pass.
+   * Returns 409 Conflict when one is already running.
+   * Returns 200 with the report on success.
+   */
+  handleReconcileTrigger(res) {
+    if (!this.reconciler) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Reconciler not initialised' }));
+      return;
+    }
+
+    this.reconciler.reconcile().then((report) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(report, null, 2));
+    }).catch((err) => {
+      const status = err.code === 'RECONCILIATION_IN_PROGRESS' ? 409 : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message, code: err.code ?? null }));
+    });
   }
 
   updateHealth(state) {

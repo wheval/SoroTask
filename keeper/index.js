@@ -12,6 +12,7 @@ const { dryRunTask } = require("./src/dryRun");
 const { executeTaskWithRetry } = require("./src/executor");
 const { ExecutionIdempotencyGuard } = require("./src/idempotency");
 const { StartupValidator } = require("./src/validator");
+const { TaskReconciler } = require("./src/reconciler");
 
 // Create root logger for the main module
 const logger = createLogger("keeper");
@@ -165,6 +166,55 @@ async function main() {
   });
   await registry.init();
 
+  // Initialize reconciler — detects and repairs drift between local registry
+  // and on-chain truth. Runs on startup and then on a configurable interval.
+  const reconciler = new TaskReconciler(
+    { poller, registry },
+    { logger: createLogger("reconciler") },
+  );
+
+  // Startup reconciliation: repair any drift accumulated while the keeper was
+  // offline (missed events, another keeper executing tasks, etc.).
+  logger.info("Running startup reconciliation");
+  try {
+    const startupReport = await reconciler.reconcile();
+    logger.info("Startup reconciliation complete", {
+      checked: startupReport.checked,
+      drifted: startupReport.drifted,
+      repaired: startupReport.repaired,
+      errors: startupReport.errors,
+    });
+  } catch (err) {
+    logger.warn("Startup reconciliation failed — continuing", { error: err.message });
+  }
+
+  // Periodic reconciliation: catch slow drift between polling cycles.
+  // Default: every 5 minutes. Override via RECONCILE_INTERVAL_MS env var.
+  const reconcileIntervalMs = parseInt(
+    process.env.RECONCILE_INTERVAL_MS || String(5 * 60 * 1000),
+    10,
+  );
+  logger.info("Scheduling periodic reconciliation", { intervalMs: reconcileIntervalMs });
+
+  const reconcileInterval = setInterval(async () => {
+    try {
+      logger.info("Starting periodic reconciliation");
+      const report = await reconciler.reconcile();
+      if (report.drifted > 0) {
+        logger.warn("Periodic reconciliation found and repaired drift", {
+          drifted: report.drifted,
+          repaired: report.repaired,
+        });
+      }
+    } catch (err) {
+      // RECONCILIATION_IN_PROGRESS is expected if the interval fires while a
+      // previous pass (e.g. from a POST /reconcile request) is still running.
+      if (err.code !== "RECONCILIATION_IN_PROGRESS") {
+        logger.error("Periodic reconciliation error", { error: err.message });
+      }
+    }
+  }, reconcileIntervalMs);
+
   // Polling loop
   const pollingIntervalMs = config.pollIntervalMs;
   logger.info("Starting polling loop", { intervalMs: pollingIntervalMs });
@@ -209,6 +259,7 @@ async function main() {
       signal,
     });
     clearInterval(pollingInterval);
+    clearInterval(reconcileInterval);
     await queue.drain();
     logger.info("Graceful shutdown complete, exiting");
     process.exit(0);
