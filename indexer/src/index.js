@@ -1,4 +1,4 @@
-const { SorobanRpc, xdr, nativeToScVal } = require("@stellar/stellar-sdk");
+const { SorobanRpc, xdr, scValToNative, nativeToScVal } = require("@stellar/stellar-sdk");
 const sqlite3 = require("sqlite3").verbose();
 
 // Configuration
@@ -36,9 +36,22 @@ let cursor = "now"; // Start from now; in production, load from storage
 
 // Event handler mapping
 async function handleEvent(event) {
-  const name = event.topic[0].value();
-  const taskId = Number(event.topic[1].value());
-  const data = event.value.value(); // Array of ScVal values
+  // Decode topics from base64 XDR strings to native values
+  const topics = event.topic.map(t => scValToNative(xdr.ScVal.fromXDR(t, 'base64')));
+  const name = topics[0];
+  // Version-aware topic extraction
+  if (topics.length > 2 && topics[1] === "v1") {
+    taskId = Number(topics[2]);
+  } else if (topics.length > 2 && typeof topics[1] === "string" && topics[1].startsWith("v")) {
+    // Future-proofing: unknown version marker detected
+    console.warn(`[Indexer] Detected unknown event version: ${topics[1]}. Attempting to parse topic[2] as taskId.`);
+    taskId = Number(topics[2]);
+  } else {
+    // Legacy event (v0): taskId is the second topic
+    taskId = Number(topics[1]);
+  }
+  
+  const data = scValToNative(xdr.ScVal.fromXDR(event.value, 'base64')); // Array of native values
 
   // Convert data to JSON based on event type
   let dataJson;
@@ -47,18 +60,22 @@ async function handleEvent(event) {
     case "TaskPaused":
     case "TaskResumed":
     case "TaskCancelled":
-      // Data: [creator: Address]
-      dataJson = JSON.stringify({ creator: data[0].toString() });
+      // Data: [creator: string]
+      dataJson = JSON.stringify({ creator: data[0] });
+      break;
+    case "ContractInitialized":
+      // Data: [token: string]
+      dataJson = JSON.stringify({ token: data[0] });
       break;
     case "KeeperPaid":
-      // Data: [keeper: Address, fee: i128]
-      dataJson = JSON.stringify({ keeper: data[0].toString(), fee: data[1].toString() });
+      // Data: [keeper: string, fee: bigint]
+      dataJson = JSON.stringify({ keeper: data[0], fee: data[1].toString() });
       break;
     case "GasDeposited":
     case "GasWithdrawn":
-      // Data: [from/creator: Address, amount: i128]
+      // Data: [from/creator: string, amount: bigint]
       dataJson = JSON.stringify({
-        address: data[0].toString(),
+        address: data[0],
         amount: data[1].toString(),
       });
       break;

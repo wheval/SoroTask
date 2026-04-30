@@ -36,6 +36,7 @@ fn base_config(env: &Env, target: Address) -> TaskConfig {
         gas_balance: 1_000,
         whitelist: Vec::new(env),
         is_active: true,
+        blocked_by: Vec::new(env),
     }
 }
 

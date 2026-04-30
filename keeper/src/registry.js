@@ -148,23 +148,27 @@ class TaskRegistry {
      * Extract the u64 task ID from the second topic of a TaskRegistered event.
      */
   _extractTaskId(event) {
-    // event.topic is an array of base64-encoded XDR ScVal values
-    // topic[0] = Symbol("TaskRegistered"), topic[1] = task_id (u64)
+    const { scValToNative } = require('@stellar/stellar-sdk');
+    
     if (!event.topic || event.topic.length < 2) {
       return null;
     }
 
-    const taskIdXdr = event.topic[1];
+    // event.topic is an array of base64-encoded XDR ScVal values
+    const topics = event.topic.map(t => scValToNative(xdr.ScVal.fromXDR(t, 'base64')));
 
-    // The topic values come as base64-encoded XDR
-    const scVal = xdr.ScVal.fromXDR(taskIdXdr, 'base64');
-
-    // Extract the u64 value
-    if (scVal.switch().name === 'scvU64') {
-      return Number(scVal.u64());
+    let taskId;
+    if (topics[1] === 'v1') {
+      // Versioned event: topic[2] is task_id
+      if (topics.length < 3) return null;
+      taskId = topics[2];
+    } else {
+      // Legacy event: topic[1] is task_id
+      taskId = topics[1];
     }
 
-    return null;
+    // Ensure it's a number
+    return typeof taskId === 'bigint' ? Number(taskId) : taskId;
   }
 
   _ensureDataDir() {

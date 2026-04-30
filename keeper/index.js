@@ -14,6 +14,7 @@ const { ExecutionIdempotencyGuard } = require("./src/idempotency");
 const { MetricsServer } = require("./src/metrics");
 const HistoryManager = require("./src/history");
 const { normalizeShardConfig, filterTasksForShard } = require("./src/sharding");
+const { StartupValidator } = require("./src/validator");
 
 // Create root logger for the main module
 const logger = createLogger("keeper");
@@ -93,6 +94,21 @@ async function main() {
     skippedTasks: 0,
   });
   metricsServer.start();
+
+  // Perform startup validation to fail fast on configuration errors
+  const validator = new StartupValidator(
+    server,
+    config.contractId,
+    config.networkPassphrase,
+    createLogger("validator")
+  );
+
+  try {
+    await validator.validate();
+  } catch (err) {
+    logger.fatal("Startup Validation Failed", { error: err.message });
+    process.exit(1);
+  }
 
   const idempotencyGuard = new ExecutionIdempotencyGuard({
     logger: createLogger("idempotency"),
