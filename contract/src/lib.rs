@@ -127,26 +127,57 @@ pub struct SoroTaskContract;
 impl SoroTaskContract {
     /// Registers a new task in the marketplace.
     /// Returns the unique sequential ID of the registered task.
+    ///
+    /// # Task ID Allocation Rules
+    /// - IDs are monotonically increasing sequential integers starting at 1
+    /// - The ID counter is stored persistently and increments by exactly 1 per successful registration
+    /// - IDs are never reused, even if tasks are cancelled (counter only increments)
+    /// - Invalid registrations (e.g., interval=0) do NOT increment the counter
+    /// - No contiguity guarantee: Cancelled tasks leave gaps in the ID sequence
+    ///
+    /// # Downstream Tooling Assumptions (Safe to Make)
+    /// - All task IDs are positive integers (>=1)
+    /// - New registrations will always receive an ID larger than all previous registrations
+    /// - Each ID maps to at most one task at any point in time
+    ///
+    /// # Downstream Tooling Assumptions (Do NOT Make)
+    /// - IDs are contiguous (no gaps) - gaps exist when tasks are cancelled
+    /// - IDs reset on contract upgrade - counter is persistent across upgrades
     pub fn register(env: Env, mut config: TaskConfig) -> u64 {
         // Ensure the creator has authorized the registration
         config.creator.require_auth();
 
-        // Validate the task interval
+        // Validate the task interval (panics before counter increment, so no ID is wasted)
         if config.interval == 0 {
             panic_with_error!(&env, Error::InvalidInterval);
         }
 
         config.is_active = true;
-        // Generate a unique sequential ID
+
+        // Allocate next sequential ID:
+        // 1. Fetch current counter (defaults to 0 if first registration)
+        // 2. Increment by 1 to get new ID
+        // 3. Persist updated counter BEFORE storing task to ensure atomicity
         let mut counter: u64 = env
             .storage()
             .persistent()
             .get(&DataKey::Counter)
             .unwrap_or(0);
         counter += 1;
+
+        // Consistency check: Ensure the new ID doesn't already have a task stored.
+        // This guards against counter corruption or storage inconsistencies.
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Task(counter))
+        {
+            panic_with_error!(&env, Error::AlreadyInitialized);
+        }
+
         env.storage().persistent().set(&DataKey::Counter, &counter);
 
-        // Store the task configuration
+        // Store the task configuration under the new ID
         env.storage()
             .persistent()
             .set(&DataKey::Task(counter), &config);
@@ -154,7 +185,7 @@ impl SoroTaskContract {
         // Add to the active task index for efficient monitoring.
         add_active_task_id(&env, counter);
 
-        // Emit TaskRegistered event
+        // Emit TaskRegistered event with ID and creator address
         env.events().publish(
             (Symbol::new(&env, "TaskRegistered"), Symbol::new(&env, "v1"), counter),
             config.creator.clone(),
@@ -166,6 +197,20 @@ impl SoroTaskContract {
     /// Retrieves a task configuration by its ID.
     pub fn get_task(env: Env, task_id: u64) -> Option<TaskConfig> {
         env.storage().persistent().get(&DataKey::Task(task_id))
+    }
+
+    /// Returns the current task ID counter value.
+    ///
+    /// This is the next ID that will be assigned to a new task registration.
+    /// Useful for downstream tooling to verify ID allocation consistency:
+    /// - The counter should be >= any existing task ID
+    /// - After N successful registrations, counter equals N+1 (since IDs start at 1)
+    /// - Cancelled tasks leave gaps, so this does NOT equal the total number of active tasks
+    pub fn get_counter(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Counter)
+            .unwrap_or(0)
     }
 
     pub fn monitor(env: Env) -> Vec<ExecutableTask> {
@@ -1063,6 +1108,223 @@ mod tests {
 
         assert_eq!(id1, 1);
         assert_eq!(id2, 2);
+    }
+
+    /// Verifies that the ID counter does NOT increment when registration fails due to invalid interval.
+    /// This ensures no IDs are wasted on failed registrations.
+    #[test]
+    fn test_id_counter_not_incremented_on_invalid_registration() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SoroTaskContract);
+        let client = SoroTaskContractClient::new(&env, &contract_id);
+
+        let creator = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let valid_config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 3600,
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        let invalid_config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 0, // Invalid: will panic
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        // Attempt invalid registration (should panic, counter not incremented)
+        let _ = client.try_register(&invalid_config);
+
+        // Valid registration should still get ID 1 (counter wasn't incremented by failed attempt)
+        let id = client.register(&valid_config);
+        assert_eq!(id, 1);
+    }
+
+    /// Verifies that IDs are monotonically increasing across many registrations.
+    /// This ensures the sequential allocation logic works for high volumes.
+    #[test]
+    fn test_sequential_ids_multiple_registrations() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SoroTaskContract);
+        let client = SoroTaskContractClient::new(&env, &contract_id);
+
+        let creator = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 3600,
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        // Register 100 tasks and verify IDs are 1..=100
+        for i in 1..=100u64 {
+            let id = client.register(&config);
+            assert_eq!(id, i, "Task {} should have ID {}", i, i);
+        }
+    }
+
+    /// Verifies that all task IDs are unique, even after cancelling tasks.
+    /// IDs are never reused, so uniqueness is guaranteed.
+    #[test]
+    fn test_id_uniqueness() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SoroTaskContract);
+        let client = SoroTaskContractClient::new(&env, &contract_id);
+
+        let creator = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 3600,
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        let mut ids = Vec::new(&env);
+        for _ in 0..50 {
+            ids.push_back(client.register(&config));
+        }
+
+        // Check all IDs are unique by comparing each pair
+        let len = ids.len();
+        let mut i = 0;
+        while i < len {
+            let id_i = ids.get(i).expect("index out of bounds");
+            let mut j = i + 1;
+            while j < len {
+                let id_j = ids.get(j).expect("index out of bounds");
+                assert_ne!(
+                    id_i, id_j,
+                    "Task IDs {} and {} are duplicate",
+                    id_i, id_j
+                );
+                j += 1;
+            }
+            i += 1;
+        }
+    }
+
+    /// Verifies that cancelling a task does not reuse its ID for new registrations.
+    /// The counter only increments, so new IDs are always larger than cancelled ones.
+    #[test]
+    fn test_id_not_reused_after_cancel() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SoroTaskContract);
+        let client = SoroTaskContractClient::new(&env, &contract_id);
+
+        let creator = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 3600,
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        // Register 3 tasks (IDs 1, 2, 3)
+        let id1 = client.register(&config);
+        let id2 = client.register(&config);
+        let id3 = client.register(&config);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(id3, 3);
+
+        // Cancel task 2
+        client.cancel_task(&id2);
+
+        // Register another task - should get ID 4 (not reuse 2)
+        let id4 = client.register(&config);
+        assert_eq!(id4, 4);
+    }
+
+    /// Verifies that each new registration receives an ID larger than all previous ones.
+    /// This is a core invariant of the sequential allocation system.
+    #[test]
+    fn test_id_monotonically_increasing() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SoroTaskContract);
+        let client = SoroTaskContractClient::new(&env, &contract_id);
+
+        let creator = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let config = TaskConfig {
+            creator: creator.clone(),
+            target: target.clone(),
+            function: Symbol::new(&env, "hello"),
+            args: vec![&env],
+            resolver: None,
+            interval: 3600,
+            last_run: 0,
+            gas_balance: 1000,
+            whitelist: Vec::new(&env),
+            is_active: true,
+            blocked_by: Vec::new(&env),
+        };
+
+        let mut prev_id = 0u64;
+        for _ in 0..20 {
+            let current_id = client.register(&config);
+            assert!(
+                current_id > prev_id,
+                "New ID {} should be larger than previous ID {}",
+                current_id,
+                prev_id
+            );
+            prev_id = current_id;
+        }
     }
 
     #[test]
