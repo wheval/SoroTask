@@ -41,6 +41,9 @@ class Metrics {
       retriesExecutedTotal: 0,
       retriesFailedTotal: 0,
       adminStateChangesTotal: 0,
+      webhookAcceptedTotal: 0,
+      webhookRejectedTotal: 0,
+      webhookReplayRejectedTotal: 0,
     };
     this.gauges = {
       avgFeePaidXlm: 0,
@@ -166,7 +169,8 @@ class MetricsServer {
     this.controlStateProvider = options.controlStateProvider || null;
     this.controlActionHandler = options.controlActionHandler || null;
     this.historyManager = options.historyManager || null;
-    this.p2pStateProvider = options.p2pStateProvider || null;
+    this.webhookHandler = options.webhookHandler || null;
+    this.webhookPath = options.webhookPath || '/webhooks/task-executions';
     this.register = new promClient.Registry();
     this.initPrometheusMetrics();
   }
@@ -183,8 +187,9 @@ class MetricsServer {
     this.controlActionHandler = handler;
   }
 
-  setP2PStateProvider(provider) {
-    this.p2pStateProvider = provider;
+  setWebhookHandler(handler, path = this.webhookPath) {
+    this.webhookHandler = handler;
+    this.webhookPath = path;
   }
 
   initPrometheusMetrics() {
@@ -219,6 +224,22 @@ class MetricsServer {
     this.promAdminStateChanges = new promClient.Counter({
       name: 'keeper_admin_state_changes_total',
       help: 'Total number of keeper admin state changes',
+      registers: [this.register],
+    });
+    this.promWebhookAccepted = new promClient.Counter({
+      name: 'keeper_webhook_accepted_total',
+      help: 'Total inbound webhook task execution requests accepted',
+      registers: [this.register],
+    });
+    this.promWebhookRejected = new promClient.Counter({
+      name: 'keeper_webhook_rejected_total',
+      help: 'Total inbound webhook task execution requests rejected',
+      labelNames: ['reason'],
+      registers: [this.register],
+    });
+    this.promWebhookReplayRejected = new promClient.Counter({
+      name: 'keeper_webhook_replay_rejected_total',
+      help: 'Total inbound webhook requests rejected by replay protection',
       registers: [this.register],
     });
     this.promAvgFee = new promClient.Gauge({
@@ -352,6 +373,9 @@ class MetricsServer {
     this.promThrottledRequests.inc({ limiter_name: 'poller-reads' }, 0);
     this.promThrottledRequests.inc({ limiter_name: 'execution-writes' }, 0);
     this.promAdminStateChanges.inc(0);
+    this.promWebhookAccepted.inc(0);
+    this.promWebhookRejected.inc({ reason: 'none' }, 0);
+    this.promWebhookReplayRejected.inc(0);
 
     this.promAvgFee.set(this.metrics.gauges.avgFeePaidXlm);
     this.promCycleDuration.set(this.metrics.gauges.lastCycleDurationMs);
@@ -458,6 +482,9 @@ class MetricsServer {
       } else if (req.url.startsWith('/admin/dead-letter/')) {
         protect(() => this.handleDeadLetterTask(req, res))();
 
+      } else if (url.pathname === this.webhookPath && this.webhookHandler) {
+        // Webhook requests (unauthenticated - auth handled by webhook handler)
+        this.webhookHandler.handle(req, res);
 
         // ❌ NOT FOUND
 
