@@ -23,7 +23,7 @@ jobs:
         
     - name: Install packages
       working-directory: ./${{ matrix.project }}
-      run: npm install
+      run: npm install --legacy-peer-deps
       
     - name: Lint
       working-directory: ./${{ matrix.project }}
