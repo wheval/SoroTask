@@ -5,6 +5,280 @@ const { requireAdminAuth } = require('./auth');
 const { URL } = require('url');
 const { createLogger } = require('./logger');
 
+const SAMPLE_BUFFER_MAX = 1000;
+
+/**
+ * Circular buffer that retains the last `maxSamples` (default 1000) numeric samples
+ * along with per-sample wall-clock timestamps.
+ *
+ * Fields:
+ *   samples    {Float64Array}  — circular buffer of sample values
+ *   timestamps {Float64Array}  — wall-clock ms for each sample (same index as samples)
+ *   head       {number}        — next write index (wraps around at maxSamples)
+ *   count      {number}        — number of valid entries (capped at maxSamples)
+ */
+class SampleBuffer {
+  /**
+   * @param {number} [maxSamples=1000]
+   */
+  constructor(maxSamples = SAMPLE_BUFFER_MAX) {
+    this.maxSamples = maxSamples;
+    this.samples = new Float64Array(maxSamples);
+    this.timestamps = new Float64Array(maxSamples);
+    this.head = 0;
+    this.count = 0;
+  }
+
+  /**
+   * Push a new sample into the buffer.  When the buffer is full the oldest
+   * entry is overwritten (circular / ring-buffer semantics).
+   *
+   * @param {number} value       — the sample value
+   * @param {number} timestampMs — wall-clock time in milliseconds
+   */
+  push(value, timestampMs) {
+    this.samples[this.head] = value;
+    this.timestamps[this.head] = timestampMs;
+    this.head = (this.head + 1) % this.maxSamples;
+    if (this.count < this.maxSamples) {
+      this.count += 1;
+    }
+  }
+
+  /**
+   * Return all sample values whose timestamp falls within the rolling window
+   * `[nowMs - windowMs, nowMs]`.
+   *
+   * @param {number} windowMs — window width in milliseconds
+   * @param {number} nowMs    — current wall-clock time in milliseconds
+   * @returns {number[]}      — array of values within the window (may be empty)
+   */
+  getWindowSamples(windowMs, nowMs) {
+    const cutoff = nowMs - windowMs;
+    const result = [];
+    for (let i = 0; i < this.count; i++) {
+      // Walk backwards from the most-recently-written slot so that we visit
+      // entries in reverse-insertion order, but the returned array preserves
+      // insertion order (oldest first).
+      const idx = (this.head - 1 - i + this.maxSamples) % this.maxSamples;
+      if (this.timestamps[idx] >= cutoff && this.timestamps[idx] <= nowMs) {
+        result.unshift(this.samples[idx]);
+      }
+    }
+    return result;
+  }
+}
+
+const MEASUREMENT_WINDOW_MS = 300000; // 5 minutes
+const indicatorLogger = createLogger('indicator-registry');
+
+/**
+ * Registry that stores rolling-window SLI samples and computes derived values
+ * (percentiles, success rates, poll freshness) for the keeper's SLO observability.
+ *
+ * All `recordXxx()` methods clamp negative inputs to 0 and emit a debug log.
+ * All percentile/rate methods return safe defaults when no data is available.
+ */
+class IndicatorRegistry {
+  constructor() {
+    // Poll tracking
+    this.lastSuccessfulPollMs = null;
+    this.totalPolls = 0;
+    this.successfulPolls = 0;
+    this.windowPolls = new SampleBuffer(); // 1 = success, 0 = failure
+
+    // Execution lateness — separate buffers per outcome
+    this.executionLatenessSuccess = new SampleBuffer();
+    this.executionLatenessFailure = new SampleBuffer();
+
+    // Retry delay
+    this.retryDelayBuffer = new SampleBuffer();
+  }
+
+  /**
+   * Record the result of a poll attempt.
+   *
+   * @param {boolean} success       — true if the poll completed successfully
+   * @param {number}  [timestampMs] — wall-clock time in ms (defaults to Date.now())
+   */
+  recordPollResult(success, timestampMs) {
+    const ts = (timestampMs !== undefined && timestampMs !== null) ? timestampMs : Date.now();
+    this.totalPolls += 1;
+    if (success) {
+      this.successfulPolls += 1;
+      this.lastSuccessfulPollMs = ts;
+    }
+    this.windowPolls.push(success ? 1 : 0, ts);
+  }
+
+  /**
+   * Compute Poll_Freshness as seconds since the last successful poll.
+   *
+   * @param {number} [nowMs] — current wall-clock time in ms (defaults to Date.now())
+   * @returns {number|null}  — null before first success; otherwise elapsed seconds (≥ 0)
+   */
+  getPollFreshness(nowMs) {
+    if (this.lastSuccessfulPollMs === null) {
+      return null;
+    }
+    const now = (nowMs !== undefined && nowMs !== null) ? nowMs : Date.now();
+    const freshness = (now - this.lastSuccessfulPollMs) / 1000;
+    if (freshness < 0) {
+      indicatorLogger.debug('getPollFreshness: negative freshness clamped to 0', { freshness });
+      return 0;
+    }
+    return freshness;
+  }
+
+  /**
+   * Record the lateness of a single execution submission.
+   *
+   * @param {number} latenessSeconds — elapsed seconds between due time and submission
+   * @param {'success'|'failure'} outcome
+   */
+  recordExecutionLateness(latenessSeconds, outcome) {
+    let value = latenessSeconds;
+    if (!Number.isFinite(value)) {
+      indicatorLogger.debug('recordExecutionLateness: non-finite value rejected', { latenessSeconds });
+      return;
+    }
+    if (value < 0) {
+      indicatorLogger.debug('recordExecutionLateness: negative value clamped to 0', { latenessSeconds });
+      value = 0;
+    }
+    const ts = Date.now();
+    if (outcome === 'failure') {
+      this.executionLatenessFailure.push(value, ts);
+    } else {
+      // Default to 'success' bucket for any other outcome string
+      this.executionLatenessSuccess.push(value, ts);
+    }
+  }
+
+  /**
+   * Compute p50, p95, p99 percentiles over execution lateness samples within
+   * the 5-minute measurement window (both success and failure combined).
+   *
+   * @returns {{ p50: number, p95: number, p99: number }}
+   */
+  getExecutionLatenessPercentiles() {
+    const now = Date.now();
+    const successSamples = this.executionLatenessSuccess.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    const failureSamples = this.executionLatenessFailure.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    const combined = successSamples.concat(failureSamples).sort((a, b) => a - b);
+    return {
+      p50: _percentile(combined, 50),
+      p95: _percentile(combined, 95),
+      p99: _percentile(combined, 99),
+    };
+  }
+
+  /**
+   * Return the raw sample array for execution lateness.
+   *
+   * @param {'success'|'failure'} [outcome] — if omitted, returns all samples combined
+   * @returns {number[]}
+   */
+  getExecutionLatenessSamples(outcome) {
+    const now = Date.now();
+    if (outcome === 'success') {
+      return this.executionLatenessSuccess.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    }
+    if (outcome === 'failure') {
+      return this.executionLatenessFailure.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    }
+    const successSamples = this.executionLatenessSuccess.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    const failureSamples = this.executionLatenessFailure.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    return successSamples.concat(failureSamples);
+  }
+
+  /**
+   * Record the delay between failure detection and retry start for a task.
+   *
+   * @param {string|number} taskId
+   * @param {number} delaySeconds — elapsed seconds (must be finite ≥ 0)
+   */
+  recordRetryDelay(taskId, delaySeconds) {
+    let value = delaySeconds;
+    if (!Number.isFinite(value)) {
+      indicatorLogger.debug('recordRetryDelay: non-finite value rejected', { taskId, delaySeconds });
+      return;
+    }
+    if (value < 0) {
+      indicatorLogger.debug('recordRetryDelay: negative value clamped to 0', { taskId, delaySeconds });
+      value = 0;
+    }
+    this.retryDelayBuffer.push(value, Date.now());
+  }
+
+  /**
+   * Compute p50 and p95 percentiles over retry delay samples within the window.
+   *
+   * @returns {{ p50: number, p95: number }}
+   */
+  getRetryDelayPercentiles() {
+    const now = Date.now();
+    const samples = this.retryDelayBuffer.getWindowSamples(MEASUREMENT_WINDOW_MS, now).sort((a, b) => a - b);
+    return {
+      p50: _percentile(samples, 50),
+      p95: _percentile(samples, 95),
+    };
+  }
+
+  /**
+   * Compute the execution success rate within the measurement window.
+   * Returns 1.0 when no data is available (no data = not failing).
+   *
+   * @returns {number} — ratio in [0.0, 1.0]
+   */
+  getExecutionSuccessRate() {
+    const now = Date.now();
+    const successSamples = this.executionLatenessSuccess.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    const failureSamples = this.executionLatenessFailure.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    const total = successSamples.length + failureSamples.length;
+    if (total === 0) {
+      return 1.0;
+    }
+    return successSamples.length / total;
+  }
+
+  /**
+   * Compute the poll success rate within the measurement window.
+   * Returns 1.0 when no data is available.
+   *
+   * @returns {number} — ratio in [0.0, 1.0]
+   */
+  getPollSuccessRate() {
+    const now = Date.now();
+    const windowSamples = this.windowPolls.getWindowSamples(MEASUREMENT_WINDOW_MS, now);
+    if (windowSamples.length === 0) {
+      return 1.0;
+    }
+    const successes = windowSamples.filter((v) => v === 1).length;
+    return successes / windowSamples.length;
+  }
+}
+
+/**
+ * Compute the Nth percentile of a pre-sorted array of numbers.
+ * Returns 0 for empty arrays.
+ *
+ * @param {number[]} sorted — array sorted ascending
+ * @param {number}   p      — percentile (0–100)
+ * @returns {number}
+ */
+function _percentile(sorted, p) {
+  if (sorted.length === 0) {
+    return 0;
+  }
+  if (sorted.length === 1) {
+    return sorted[0];
+  }
+  // Nearest-rank method
+  const rank = Math.ceil((p / 100) * sorted.length);
+  return sorted[Math.min(rank, sorted.length) - 1];
+}
+
 class Metrics {
   constructor() {
     this.startTime = Date.now();
@@ -166,12 +440,35 @@ class MetricsServer {
     this.server = null;
     this.registry = null;
     this.metrics = new Metrics();
+    this.config = options.config || null;
     this.controlStateProvider = options.controlStateProvider || null;
     this.controlActionHandler = options.controlActionHandler || null;
     this.historyManager = options.historyManager || null;
     this.webhookHandler = options.webhookHandler || null;
     this.webhookPath = options.webhookPath || '/webhooks/task-executions';
     this.register = new promClient.Registry();
+
+    // Instantiate IndicatorRegistry for SLO observability.
+    // When metrics are disabled (no port configured), recordXxx() calls become no-ops
+    // by wrapping the registry in a proxy that silently discards writes.
+    const metricsEnabled = Boolean(
+      options.port || parseInt(process.env.METRICS_PORT, 10),
+    );
+    if (metricsEnabled) {
+      this.indicatorRegistry = new IndicatorRegistry();
+    } else {
+      // No-op proxy: all method calls are silently discarded
+      this.indicatorRegistry = new Proxy(new IndicatorRegistry(), {
+        get(target, prop) {
+          const value = target[prop];
+          if (typeof value === 'function' && prop.startsWith('record')) {
+            return () => {};
+          }
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    }
+
     this.initPrometheusMetrics();
   }
 
@@ -358,6 +655,91 @@ class MetricsServer {
       registers: [this.register],
     });
 
+    // SLO / SLI metrics
+    this.promPollFreshness = new promClient.Gauge({
+      name: 'keeper_poll_freshness_seconds',
+      help: 'Seconds since last successful poll. -1 if no poll has completed yet.',
+      registers: [this.register],
+    });
+
+    this.promExecutionLatenessHistogram = new promClient.Histogram({
+      name: 'keeper_execution_lateness_seconds',
+      help: 'Seconds between task due time and execution submission.',
+      buckets: [0, 1, 5, 10, 30, 60, 120, 300],
+      registers: [this.register],
+    });
+
+    this.promExecutionLatenessP50 = new promClient.Gauge({
+      name: 'keeper_execution_lateness_p50_seconds',
+      help: 'p50 percentile of execution lateness in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promExecutionLatenessP95 = new promClient.Gauge({
+      name: 'keeper_execution_lateness_p95_seconds',
+      help: 'p95 percentile of execution lateness in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promExecutionLatenessP99 = new promClient.Gauge({
+      name: 'keeper_execution_lateness_p99_seconds',
+      help: 'p99 percentile of execution lateness in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promRetryDelayP50 = new promClient.Gauge({
+      name: 'keeper_retry_delay_p50_seconds',
+      help: 'p50 percentile of retry delay in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promRetryDelayP95 = new promClient.Gauge({
+      name: 'keeper_retry_delay_p95_seconds',
+      help: 'p95 percentile of retry delay in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promExecutionSuccessRate = new promClient.Gauge({
+      name: 'keeper_execution_success_rate',
+      help: 'Ratio of successful executions in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promPollSuccessRate = new promClient.Gauge({
+      name: 'keeper_poll_success_rate',
+      help: 'Ratio of successful polls in the 5-minute measurement window.',
+      registers: [this.register],
+    });
+
+    this.promSLOBreach = new promClient.Gauge({
+      name: 'keeper_slo_breach',
+      help: '1 if the current SLI value exceeds the configured threshold, 0 otherwise.',
+      labelNames: ['sli'],
+      registers: [this.register],
+    });
+
+    this.promSLOThreshold = new promClient.Gauge({
+      name: 'keeper_slo_threshold',
+      help: 'Configured SLO threshold value per SLI.',
+      labelNames: ['sli'],
+      registers: [this.register],
+    });
+
+    this.promBuildInfo = new promClient.Gauge({
+      name: 'keeper_build_info',
+      help: 'Keeper build information.',
+      labelNames: ['version', 'node_env'],
+      registers: [this.register],
+    });
+    // Set build info once at startup (static labels)
+    this.promBuildInfo.set(
+      {
+        version: process.env.npm_package_version || 'unknown',
+        node_env: process.env.NODE_ENV || 'production',
+      },
+      1,
+    );
+
     promClient.collectDefaultMetrics({ register: this.register });
   }
 
@@ -419,6 +801,59 @@ class MetricsServer {
       const pressureMap = { low: 0, medium: 1, high: 2, critical: 3 };
       this.promBudgetPressureLevel.set(pressureMap[budgetStats.pressure] || 0);
     }
+
+    // SLO / SLI metrics from IndicatorRegistry
+    const pollFreshness = this.indicatorRegistry.getPollFreshness();
+    this.promPollFreshness.set(pollFreshness === null ? -1 : pollFreshness);
+
+    const latenessPercentiles = this.indicatorRegistry.getExecutionLatenessPercentiles();
+    this.promExecutionLatenessP50.set(latenessPercentiles.p50);
+    this.promExecutionLatenessP95.set(latenessPercentiles.p95);
+    this.promExecutionLatenessP99.set(latenessPercentiles.p99);
+
+    const retryDelayPercentiles = this.indicatorRegistry.getRetryDelayPercentiles();
+    this.promRetryDelayP50.set(retryDelayPercentiles.p50);
+    this.promRetryDelayP95.set(retryDelayPercentiles.p95);
+
+    const executionSuccessRate = this.indicatorRegistry.getExecutionSuccessRate();
+    this.promExecutionSuccessRate.set(executionSuccessRate);
+
+    const pollSuccessRate = this.indicatorRegistry.getPollSuccessRate();
+    this.promPollSuccessRate.set(pollSuccessRate);
+
+    // SLO breach and threshold gauges
+    const thresholds = (this.config && this.config.sloThresholds) ? this.config.sloThresholds : {
+      stalePollSeconds: 30,
+      executionLatenessSeconds: 60,
+      maxRetryDelaySeconds: 120,
+      minExecutionSuccessRate: 0.95,
+      minPollSuccessRate: 0.99,
+    };
+
+    // poll_freshness: breaches when freshness > stalePollSeconds (null = no data, no breach)
+    const pollFreshnessBreach = (pollFreshness !== null && pollFreshness > thresholds.stalePollSeconds) ? 1 : 0;
+    this.promSLOBreach.set({ sli: 'poll_freshness' }, pollFreshnessBreach);
+    this.promSLOThreshold.set({ sli: 'poll_freshness' }, thresholds.stalePollSeconds);
+
+    // execution_lateness: breaches when p95 > executionLatenessSeconds
+    const executionLatenessBreach = latenessPercentiles.p95 > thresholds.executionLatenessSeconds ? 1 : 0;
+    this.promSLOBreach.set({ sli: 'execution_lateness' }, executionLatenessBreach);
+    this.promSLOThreshold.set({ sli: 'execution_lateness' }, thresholds.executionLatenessSeconds);
+
+    // execution_success_rate: breaches when rate < minExecutionSuccessRate
+    const executionSuccessRateBreach = executionSuccessRate < thresholds.minExecutionSuccessRate ? 1 : 0;
+    this.promSLOBreach.set({ sli: 'execution_success_rate' }, executionSuccessRateBreach);
+    this.promSLOThreshold.set({ sli: 'execution_success_rate' }, thresholds.minExecutionSuccessRate);
+
+    // poll_success_rate: breaches when rate < minPollSuccessRate
+    const pollSuccessRateBreach = pollSuccessRate < thresholds.minPollSuccessRate ? 1 : 0;
+    this.promSLOBreach.set({ sli: 'poll_success_rate' }, pollSuccessRateBreach);
+    this.promSLOThreshold.set({ sli: 'poll_success_rate' }, thresholds.minPollSuccessRate);
+
+    // retry_delay: breaches when p95 > maxRetryDelaySeconds
+    const retryDelayBreach = retryDelayPercentiles.p95 > thresholds.maxRetryDelaySeconds ? 1 : 0;
+    this.promSLOBreach.set({ sli: 'retry_delay' }, retryDelayBreach);
+    this.promSLOThreshold.set({ sli: 'retry_delay' }, thresholds.maxRetryDelaySeconds);
   }
 
   incrementBudgetConsumed(scope = 'global') {
@@ -725,4 +1160,4 @@ class MetricsServer {
   }
 }
 
-module.exports = { Metrics, MetricsServer };
+module.exports = { Metrics, MetricsServer, SampleBuffer, IndicatorRegistry };

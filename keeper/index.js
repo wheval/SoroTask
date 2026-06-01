@@ -141,6 +141,7 @@ async function main() {
     shardLabel: shardConfig.shardLabel,
     driftWarningSeconds: config.driftWarningSeconds,
     driftCriticalSeconds: config.driftCriticalSeconds,
+    config,
   });
   logger.info("Poller initialized", { contractId: config.contractId });
 

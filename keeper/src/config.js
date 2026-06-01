@@ -1,6 +1,9 @@
 const dotenv = require('dotenv');
+const { createLogger } = require('./logger');
 
 dotenv.config();
+
+const logger = createLogger('config');
 
 function parseInteger(value, fallback) {
   const parsed = parseInt(value, 10);
@@ -49,7 +52,7 @@ function loadConfig() {
     throw new Error('INBOUND_WEBHOOK_SECRET or INBOUND_WEBHOOK_SECRETS is required when INBOUND_WEBHOOKS_ENABLED=true');
   }
 
-  return {
+  const config = {
     rpcUrl: process.env.SOROBAN_RPC_URL,
     networkPassphrase: process.env.NETWORK_PASSPHRASE,
     keeperSecret: process.env.KEEPER_SECRET,
@@ -98,7 +101,25 @@ function loadConfig() {
       replayTtlMs: parseInteger(process.env.INBOUND_WEBHOOK_REPLAY_TTL_MS, 600000),
       maxBodyBytes: parseInteger(process.env.INBOUND_WEBHOOK_MAX_BODY_BYTES, 1048576),
     },
+    // SLO threshold configuration
+    sloThresholds: {
+      stalePollSeconds: parseInteger(process.env.SLO_STALE_POLL_SECONDS, 30),
+      executionLatenessSeconds: parseInteger(process.env.SLO_EXECUTION_LATENESS_SECONDS, 60),
+      maxRetryDelaySeconds: parseInteger(process.env.SLO_MAX_RETRY_DELAY_SECONDS, 120),
+      minExecutionSuccessRate: parseFloat(process.env.SLO_MIN_EXECUTION_SUCCESS_RATE) || 0.95,
+      minPollSuccessRate: parseFloat(process.env.SLO_MIN_POLL_SUCCESS_RATE) || 0.99,
+    },
   };
+
+  logger.info('SLO thresholds active', {
+    stalePollSeconds: config.sloThresholds.stalePollSeconds,
+    executionLatenessSeconds: config.sloThresholds.executionLatenessSeconds,
+    maxRetryDelaySeconds: config.sloThresholds.maxRetryDelaySeconds,
+    minExecutionSuccessRate: config.sloThresholds.minExecutionSuccessRate,
+    minPollSuccessRate: config.sloThresholds.minPollSuccessRate,
+  });
+
+  return config;
 }
 
 module.exports = { loadConfig };

@@ -84,7 +84,7 @@ function normalizeSubmissionError(error, fallbackCode) {
 
 async function executeTaskOnce(
   taskId,
-  { server, keypair, account, contractId, networkPassphrase, correlationId, logger: customLogger },
+  { server, keypair, account, contractId, networkPassphrase, correlationId, logger: customLogger, dueTime, metricsServer, config },
 ) {
   const taskLogger = customLogger || logger;
   const contract = new Contract(contractId);
@@ -117,11 +117,38 @@ async function executeTaskOnce(
   const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
   preparedTx.sign(keypair);
 
+  // Compute execution lateness before submitting (requirement 3.1, 3.2)
+  const latenessSeconds = (dueTime != null && Number.isFinite(Number(dueTime)))
+    ? Math.max(0, Date.now() / 1000 - Number(dueTime))
+    : null;
+
+  /**
+   * Record execution lateness metric and emit warning log if threshold exceeded.
+   * @param {'success'|'failure'} outcome
+   */
+  function recordLateness(outcome) {
+    if (latenessSeconds === null || !metricsServer || !metricsServer.indicatorRegistry) {
+      return;
+    }
+    metricsServer.indicatorRegistry.recordExecutionLateness(latenessSeconds, outcome);
+    const latenessThreshold = config && config.sloThresholds
+      ? config.sloThresholds.executionLatenessSeconds
+      : 60;
+    if (latenessSeconds > latenessThreshold) {
+      taskLogger.warn('Execution lateness exceeds threshold', {
+        task_id: taskId,
+        latenessSeconds,
+        thresholdSeconds: latenessThreshold,
+      });
+    }
+  }
+
   let sendResult;
   try {
     taskLogger.debug("Submitting transaction", { taskId, correlationId });
     sendResult = await server.sendTransaction(preparedTx);
   } catch (error) {
+    recordLateness('failure');
     throw normalizeSubmissionError(error, "NETWORK_ERROR");
   }
 
@@ -139,6 +166,7 @@ async function executeTaskOnce(
         sendResult.error ||
         "Transaction submission error",
     );
+    recordLateness('failure');
     throw normalizeSubmissionError(
       Object.assign(new Error(`Send failed: ${sendError}`), {
         code: /duplicate|already in ledger/i.test(sendError)
@@ -150,15 +178,20 @@ async function executeTaskOnce(
 
   const { status, feePaid } = await pollTransaction(server, sendResult.hash, { logger: taskLogger });
   if (status === "FAILED") {
+    recordLateness('failure');
     throw Object.assign(new Error("Transaction reached FAILED status"), {
       code: "TX_FAILED",
     });
   }
   if (status === "TIMEOUT") {
+    recordLateness('failure');
     throw Object.assign(new Error("Transaction polling timed out"), {
       code: "TIMEOUT_ERROR",
     });
   }
+
+  // Record lateness for success outcome (requirement 3.2, 3.6)
+  recordLateness('success');
 
   return { taskId, txHash, status, feePaid, error: null };
 }
@@ -177,7 +210,7 @@ async function executeTaskOnce(
  */
 async function executeTask(
   taskId,
-  { server, keypair, account, contractId, networkPassphrase, correlationId },
+  { server, keypair, account, contractId, networkPassphrase, correlationId, dueTime, metricsServer, config },
 ) {
   const taskLogger = correlationId ? logger.childWithTrace(correlationId) : logger;
   /** @type {{taskId, txHash: string|null, status: string, feePaid: number, error: string|null}} */
@@ -198,6 +231,9 @@ async function executeTask(
       networkPassphrase,
       correlationId,
       logger: taskLogger,
+      dueTime,
+      metricsServer,
+      config,
     });
     result.txHash = executionResult.txHash;
     result.status = executionResult.status;

@@ -24,10 +24,19 @@ class RetryScheduler {
     this.retryQueue = new Map(); // taskId -> retry metadata
     this.initialized = false;
     this.budgetTracker = budgetTracker;
+    this.metricsServer = null; // set via setMetricsServer() after construction
   }
 
   setBudgetTracker(budgetTracker) {
     this.budgetTracker = budgetTracker;
+  }
+
+  /**
+   * Attach a MetricsServer instance so retry delay SLI can be recorded.
+   * @param {object} metricsServer
+   */
+  setMetricsServer(metricsServer) {
+    this.metricsServer = metricsServer;
   }
 
   /**
@@ -185,6 +194,7 @@ class RetryScheduler {
       },
       createdAt: Date.now(),
       lastUpdated: Date.now(),
+      failureDetectedAt: Date.now(), // wall-clock ms when failure was detected (for Retry_Delay SLI)
     };
 
     // Add to queue
@@ -218,6 +228,23 @@ class RetryScheduler {
 
     for (const [taskId, retry] of this.retryQueue) {
       if (retry.nextAttemptTime <= currentTime) {
+        // Record Retry_Delay SLI: elapsed time from failure detection to retry start
+        if (this.metricsServer && this.metricsServer.indicatorRegistry && retry.failureDetectedAt) {
+          const delaySeconds = Math.max(0, (currentTime - retry.failureDetectedAt) / 1000);
+          this.metricsServer.indicatorRegistry.recordRetryDelay(taskId, delaySeconds);
+
+          const maxRetryDelaySeconds = this.config.sloThresholds
+            ? this.config.sloThresholds.maxRetryDelaySeconds
+            : 120;
+          if (delaySeconds > maxRetryDelaySeconds) {
+            console.warn(`[RetryScheduler] Retry delay exceeds threshold`, {
+              task_id: taskId,
+              delaySeconds,
+              thresholdSeconds: maxRetryDelaySeconds,
+            });
+          }
+        }
+
         readyRetries.push({
           taskId,
           ...retry,
