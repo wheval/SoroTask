@@ -94,7 +94,7 @@ describe("ExecutionQueue", () => {
       await queue.enqueue([1], executorFn);
 
       expect(executorFn).toHaveBeenCalledTimes(1);
-      expect(executorFn).toHaveBeenCalledWith(1);
+      expect(executorFn).toHaveBeenCalledWith(1, expect.any(Object));
     });
 
     it("should execute multiple tasks", async () => {
@@ -103,6 +103,35 @@ describe("ExecutionQueue", () => {
       await queue.enqueue([1, 2, 3], executorFn);
 
       expect(executorFn).toHaveBeenCalledTimes(3);
+    });
+
+    it("should prioritize higher priority tasks when concurrency is limited", async () => {
+      const priorityQueue = new ExecutionQueue(1, null, createMockRetryScheduler());
+      const executionOrder = [];
+      const executorFn = jest.fn(async (taskId) => {
+        executionOrder.push(taskId);
+      });
+
+      await priorityQueue.enqueue(
+        [
+          { taskId: 1, priority: 'low' },
+          { taskId: 2, priority: 'critical' },
+          { taskId: 3, priority: 'medium' },
+        ],
+        executorFn,
+      );
+
+      expect(executionOrder).toEqual([2, 3, 1]);
+    });
+
+    it('should skip tasks already scheduled for retry', async () => {
+      queue.retryScheduler.getRetryMetadata.mockReturnValue({ taskId: 1, nextAttemptTime: Date.now() + 1000 });
+      const executorFn = jest.fn().mockResolvedValue(undefined);
+
+      await queue.enqueue([1, 2], executorFn);
+
+      expect(executorFn).toHaveBeenCalledTimes(1);
+      expect(executorFn).toHaveBeenCalledWith(2, expect.any(Object));
     });
 
     it("should respect MAX_CONCURRENT_EXECUTIONS", async () => {
@@ -129,7 +158,7 @@ describe("ExecutionQueue", () => {
       const executorFn = jest.fn().mockResolvedValue(undefined);
       await queue.enqueue([1], executorFn);
 
-      expect(startedSpy).toHaveBeenCalledWith(1);
+      expect(startedSpy).toHaveBeenCalledWith(1, expect.any(Object));
     });
 
     it("should emit task:success event on success", async () => {
@@ -139,7 +168,7 @@ describe("ExecutionQueue", () => {
       const executorFn = jest.fn().mockResolvedValue(undefined);
       await queue.enqueue([1], executorFn);
 
-      expect(successSpy).toHaveBeenCalledWith(1);
+      expect(successSpy).toHaveBeenCalledWith(1, expect.any(Object));
     });
 
     it("should emit task:failed event on failure", async () => {
@@ -425,7 +454,7 @@ describe("ExecutionQueue", () => {
       await queue.enqueue([1, 2], executorFn);
 
       expect(executorFn).toHaveBeenCalledTimes(1);
-      expect(executorFn).toHaveBeenCalledWith(2);
+      expect(executorFn).toHaveBeenCalledWith(2, expect.any(Object));
     });
 
     it('should schedule retry on task failure', async () => {

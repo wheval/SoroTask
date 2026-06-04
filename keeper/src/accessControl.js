@@ -262,6 +262,7 @@ const CONTRACT_ENTRY_POINTS = Object.freeze([
     mechanism: 'VRF oracle address match (no require_auth)',
     notes: [
       'Uses env.current_contract_address() comparison instead of require_auth.',
+      'no require_auth is performed for the configured oracle address.',
       'AMBIGUITY: no cryptographic proof that caller is the configured oracle.',
       'Any contract that somehow gets the VRF oracle address slot could fulfill.',
     ].join(' '),

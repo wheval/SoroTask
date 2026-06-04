@@ -38,6 +38,8 @@ class Metrics {
     );
     this.maxFeeSamples = 100;
     this.lastPollAt = null;
+    this.lastBacklogSize = null;
+    this.retryPressure = 0;
     this.rpcConnected = false;
     this.adminState = { paused: false, reason: null, changedAt: null };
     this.shardState = {
@@ -124,6 +126,12 @@ class Metrics {
     if (typeof state.rpcConnected === 'boolean') {
       this.rpcConnected = state.rpcConnected;
     }
+    if (typeof state.backlogSize === 'number') {
+      this.lastBacklogSize = state.backlogSize;
+    }
+    if (typeof state.retryBudgetPressure === 'number') {
+      this.retryPressure = state.retryBudgetPressure;
+    }
   }
 
   updateAdminState(state = {}) {
@@ -175,19 +183,70 @@ class Metrics {
   getHealthStatus(staleThreshold) {
     const now = Date.now();
     const uptimeSeconds = Math.floor((now - this.startTime) / 1000);
-    const isStale = this.lastPollAt && now - this.lastPollAt.getTime() > staleThreshold;
+    const lastPollAgeMs = this.lastPollAt ? now - this.lastPollAt.getTime() : null;
+    const isStale = lastPollAgeMs == null || lastPollAgeMs > staleThreshold;
+    const rpcCircuitState = this.gauges.rpcCircuitState === 2
+      ? 'OPEN'
+      : (this.gauges.rpcCircuitState === 1 ? 'HALF_OPEN' : 'CLOSED');
+    const backlogSize = typeof this.lastBacklogSize === 'number' ? this.lastBacklogSize : 0;
+    const retryBudgetPressure = this.retryPressure || 0;
+
+    const healthIssues = [];
+    if (!this.rpcConnected) {
+      healthIssues.push('RPC connectivity lost');
+    }
+    if (rpcCircuitState === 'HALF_OPEN') {
+      healthIssues.push('RPC circuit half-open');
+    }
+    if (rpcCircuitState === 'OPEN') {
+      healthIssues.push('RPC circuit open');
+    }
+    if (backlogSize > 200) {
+      healthIssues.push(`Polling backlog pressure: ${backlogSize} known task IDs`);
+    }
+    if (retryBudgetPressure >= 0.8) {
+      healthIssues.push(`Retry budget pressure at ${(retryBudgetPressure * 100).toFixed(0)}%`);
+    }
+    if (lastPollAgeMs != null && lastPollAgeMs > staleThreshold) {
+      healthIssues.push('Polling has not updated within threshold');
+    }
+    if (lastPollAgeMs == null) {
+      healthIssues.push('No successful poll has completed yet');
+    }
+
+    let status = 'healthy';
+    let statusDescription = 'Keeper is operating normally.';
+
+    if (!this.lastPollAt || rpcCircuitState === 'OPEN') {
+      status = 'unhealthy';
+      statusDescription = 'Keeper is unavailable due to stale polling or broken RPC circuits.';
+    } else if (isStale) {
+      status = 'stale';
+      statusDescription = 'Keeper polling is stale and may delay task execution. Check RPC and scheduler health.';
+    } else if (backlogSize > 500 || retryBudgetPressure >= 0.95) {
+      status = 'unhealthy';
+      statusDescription = 'Keeper is overloaded by backlog or retry pressure and may fail to keep up with task execution.';
+    } else if (!this.rpcConnected || rpcCircuitState === 'HALF_OPEN' || backlogSize > 200 || retryBudgetPressure >= 0.8) {
+      status = 'degraded';
+      statusDescription = 'Partial degradation detected. Some RPC, backlog, or retry behavior is impaired but the service is still responding.';
+    }
 
     return {
-      status: isStale ? 'stale' : 'ok',
+      status,
+      statusDescription,
+      statusSeverity: status === 'healthy' ? 'info' : status === 'degraded' ? 'warning' : 'critical',
       uptime: uptimeSeconds,
       lastPollAt: this.lastPollAt ? this.lastPollAt.toISOString() : null,
+      lastPollAgeMs,
+      staleThresholdMs: staleThreshold,
       rpcConnected: this.rpcConnected,
-      rpcCircuitState: this.gauges.rpcCircuitState === 2
-        ? 'OPEN'
-        : (this.gauges.rpcCircuitState === 1 ? 'HALF_OPEN' : 'CLOSED'),
+      rpcCircuitState,
+      backlogSize,
+      retryBudgetPressure,
       paused: this.adminState.paused,
       pauseReason: this.adminState.reason,
       shard: { ...this.shardState },
+      healthIssues,
     };
   }
 }
@@ -392,6 +451,16 @@ class MetricsServer {
       help: 'RPC circuit breaker state (0 = CLOSED, 1 = HALF_OPEN, 2 = OPEN)',
       registers: [this.register],
     });
+    this.promBacklogSize = new promClient.Gauge({
+      name: 'keeper_backlog_size',
+      help: 'Number of task IDs currently known to the keeper registry',
+      registers: [this.register],
+    });
+    this.promRetryBudgetPressure = new promClient.Gauge({
+      name: 'keeper_retry_budget_pressure',
+      help: 'Current global retry budget pressure as a fraction between 0 and 1',
+      registers: [this.register],
+    });
     this.promAdminPaused = new promClient.Gauge({
       name: 'keeper_admin_paused',
       help: 'Whether the keeper is administratively paused (1 = paused, 0 = active)',
@@ -519,6 +588,8 @@ class MetricsServer {
     this.promUptime.set(Math.floor((Date.now() - this.metrics.startTime) / 1000));
     this.promRpcConnected.set(this.metrics.rpcConnected ? 1 : 0);
     this.promRpcCircuitState.set(this.metrics.gauges.rpcCircuitState);
+    this.promBacklogSize.set(this.metrics.lastBacklogSize || 0);
+    this.promRetryBudgetPressure.set(this.metrics.retryPressure || 0);
     this.promAdminPaused.set(this.metrics.adminState.paused ? 1 : 0);
     this.promShardOwnedTasks.set(
       {
@@ -694,7 +765,7 @@ class MetricsServer {
         retryBudget: this.retryBudgetTracker.getStats(),
       }),
     };
-    res.writeHead(status.status === 'stale' ? 503 : 200, {
+    res.writeHead(['stale', 'unhealthy'].includes(status.status) ? 503 : 200, {
       'Content-Type': 'application/json',
     });
     res.end(JSON.stringify(healthData, null, 2));

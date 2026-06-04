@@ -13,5 +13,9 @@
   "dependencies": {
     "@stellar/stellar-sdk": "^15.0.1",
     "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "supertest": "^7.2.2"
   }
 }

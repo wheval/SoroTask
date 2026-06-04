@@ -12,6 +12,7 @@ See the centralized [Glossary](../GLOSSARY.md) for definitions of domain-specifi
 - [Setup Instructions](#setup-instructions)
 - [P2P Keeper Discovery](#p2p-keeper-discovery)
 - [Dead-Letter Queue](#dead-letter-queue)
+- [Serverless Resolvers](#serverless-resolvers)
 - [Mock Soroban RPC](#mock-soroban-rpc-for-faster-local-testing)
 - [Chaos Testing](#chaos-testing)
 - [Docker Deployment](#docker-deployment)
@@ -104,6 +105,11 @@ P2P_LISTEN_PORT=4100
 # Recurring schedule drift thresholds (seconds)
 DRIFT_WARNING_SECONDS=60
 DRIFT_CRITICAL_SECONDS=300
+
+# Optional serverless resolver runtime
+# RESOLVER_FUNCTIONS_CONFIG=./resolvers.json
+RESOLVER_DEFAULT_TIMEOUT_MS=250
+RESOLVER_FAILURE_MODE=skip
 ```
 
 ### Explanation of Variables:
@@ -133,6 +139,15 @@ DRIFT_CRITICAL_SECONDS=300
 - **`P2P_ENABLED` / `P2P_SHARED_SECRET`**: Enables signed peer discovery and load-aware ownership. See [P2P Keeper Discovery](./docs/p2p-keeper-discovery.md).
 - **`P2P_PUBLIC_URL` / `P2P_BOOTSTRAP_PEERS`**: Advertised peer URL and initial peer list used to join the keeper mesh.
 - **`DRIFT_WARNING_SECONDS` / `DRIFT_CRITICAL_SECONDS`**: Thresholds for recurring execution drift classification.
+- **`RESOLVER_FUNCTIONS_CONFIG`**: Optional JSON file mapping task resolver IDs to sandboxed JS/WASM functions.
+- **`RESOLVER_DEFAULT_TIMEOUT_MS`**: Default per-invocation resolver timeout.
+- **`RESOLVER_FAILURE_MODE`**: `skip` fails closed on resolver errors; `allow` fails open for controlled migrations.
+
+## Serverless Resolvers
+
+The keeper can evaluate custom JavaScript or WASM resolver logic before enqueueing a due task. Resolvers run after interval and gas checks, inside a bounded runtime with static capability checks, payload size limits, and per-call timeouts. Tasks without resolver IDs are unchanged.
+
+See [Serverless Resolver Runtime](./docs/serverless-resolvers.md) for configuration, authoring examples, and the security model.
 
 ## RPC Load Balancer Configuration
 
@@ -166,6 +181,17 @@ RPC_LOAD_BALANCING_STRATEGY=weighted_round_robin
 - Health monitoring uses `getNetwork()` and `getLatestLedger()` calls to verify RPC endpoint availability
 - Metrics for the load balancer are exposed via the standard `/metrics/prometheus` endpoint
 - The load balancer is backward compatible - if only one RPC endpoint is configured, it operates in single-server mode
+
+## Health Status Interpretation
+
+The keeper health endpoint reports richer state than a binary up/down signal. Operators will see:
+
+- `healthy`: keeper is polling and RPC connectivity is working normally.
+- `degraded`: partial issues are present, such as RPC disconnects or a half-open circuit breaker.
+- `stale`: polling has not refreshed within the configured `HEALTH_STALE_THRESHOLD_MS` window.
+- `unhealthy`: the keeper is not operational due to missing polls or failed RPC health.
+
+This makes it easier to distinguish slow recovery from critical outages during incident response.
 
 ## P2P Keeper Discovery
 
@@ -526,6 +552,8 @@ docker compose ps
 ### Data Persistence
 
 The task registry (`data/tasks.json`) is stored in `./keeper/data/` on the host and mounted into the container. It survives container restarts and upgrades automatically.
+
+Note: task IDs are expected to be sequential for a healthy registration history. The keeper exposes allocation summaries that surface missing IDs or duplicate registration events so operators can distinguish delayed task discovery from actual registry drift.
 
 ### Standalone Docker Commands (npm scripts)
 

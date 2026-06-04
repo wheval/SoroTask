@@ -471,6 +471,10 @@ class ReadBatcher extends EventEmitter {
         return null;
       }
 
+      if (Object.prototype.hasOwnProperty.call(idVal, '_taskId')) {
+        return Number(idVal._taskId);
+      }
+
       return Number(scValToNative(idVal));
     } catch {
       return null;
