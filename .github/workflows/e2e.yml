@@ -18,12 +18,10 @@ jobs:
       - name: Setup Modern Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Install stellar-cli
-        uses: stellar/setup-stellar-cli@v1
-        with:
-          version: 21.6.0
+        uses: stellar/stellar-cli@v23.0.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -55,4 +53,5 @@ jobs:
       - name: Export Logs on Failure
         if: failure()
         run: |
-          docker logs soroban-local
+          docker logs soroban-local || echo "Container soroban-local not found"
+          docker ps -a

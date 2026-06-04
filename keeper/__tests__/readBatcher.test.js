@@ -596,7 +596,14 @@ describe('TaskPoller with ReadBatcher integration', () => {
   });
 
   it('uses preloadedConfig from batcher instead of calling simulateTransaction', async () => {
-    const taskConfig = { last_run: 500, interval: 400, gas_balance: 1000, args: [] };
+    const taskConfig = {
+      target: CONTRACT_ID,
+      function: 'ping',
+      last_run: 500,
+      interval: 400,
+      gas_balance: 1000,
+      args: [],
+    };
 
     // Batcher returns the config without simulateTransaction being called
     const batcher = new ReadBatcher(mockServer, contractId, () => taskConfig, {
@@ -619,7 +626,14 @@ describe('TaskPoller with ReadBatcher integration', () => {
   });
 
   it('falls back to per-task simulateTransaction when batcher.readMany rejects', async () => {
-    const taskConfig = { last_run: 500, interval: 400, gas_balance: 1000, args: [] };
+    const taskConfig = {
+      target: CONTRACT_ID,
+      function: 'ping',
+      last_run: 500,
+      interval: 400,
+      gas_balance: 1000,
+      args: [],
+    };
 
     // Batcher that always fails
     const batcher = new ReadBatcher(mockServer, contractId, () => null, { batchWindowMs: 0 });
