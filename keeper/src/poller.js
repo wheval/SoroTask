@@ -340,10 +340,13 @@ class TaskPoller {
       };
 
       if (this.metricsServer) {
+        const retryStats = this.metricsServer.retryBudgetTracker?.getStats?.() || { global: { percentage: 0 } };
         this.metricsServer.increment('tasksCheckedTotal', this.stats.tasksChecked);
         this.metricsServer.updateHealth({
           lastPollAt: new Date(),
           rpcConnected: true,
+          backlogSize: taskIds.length,
+          retryBudgetPressure: retryStats.global?.percentage || 0,
         });
         this.metricsServer.updateDriftState({
           warning: warningDriftCount,

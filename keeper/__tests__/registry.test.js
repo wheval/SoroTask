@@ -101,6 +101,39 @@ describe('TaskRegistry', () => {
     expect(registry.getTaskIds()).toEqual([1]);
   });
 
+  test('reports task id allocation gaps and sequence summary', async () => {
+    const events = [
+      makeTaskRegisteredEvent(1, 900),
+      makeTaskRegisteredEvent(3, 910),
+      makeTaskRegisteredEvent(4, 920),
+    ];
+    const server = mockServer(events);
+    const registry = new TaskRegistry(server, 'CABC123', { startLedger: 800 });
+
+    await registry.init();
+
+    const summary = registry.getTaskIdAllocationSummary();
+    expect(summary.highestTaskId).toBe(4);
+    expect(summary.missingTaskIds).toEqual([2]);
+    expect(summary.isStrictlySequential).toBe(false);
+  });
+
+  test('records duplicate registration events without breaking registry state', async () => {
+    const events = [
+      makeTaskRegisteredEvent(5, 900),
+      makeTaskRegisteredEvent(5, 910),
+    ];
+    const server = mockServer(events);
+    const registry = new TaskRegistry(server, 'CABC123', { startLedger: 800 });
+
+    await registry.init();
+
+    expect(registry.getTaskIds()).toEqual([5]);
+    const summary = registry.getTaskIdAllocationSummary();
+    expect(summary.duplicateTaskIds).toEqual([5]);
+    expect(summary.isStrictlySequential).toBe(false);
+  });
+
   test('poll discovers new tasks', async () => {
     const server = mockServer([makeTaskRegisteredEvent(1, 900)]);
     const registry = new TaskRegistry(server, 'CABC123', { startLedger: 800 });

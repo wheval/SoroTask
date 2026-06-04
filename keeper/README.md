@@ -182,6 +182,17 @@ RPC_LOAD_BALANCING_STRATEGY=weighted_round_robin
 - Metrics for the load balancer are exposed via the standard `/metrics/prometheus` endpoint
 - The load balancer is backward compatible - if only one RPC endpoint is configured, it operates in single-server mode
 
+## Health Status Interpretation
+
+The keeper health endpoint reports richer state than a binary up/down signal. Operators will see:
+
+- `healthy`: keeper is polling and RPC connectivity is working normally.
+- `degraded`: partial issues are present, such as RPC disconnects or a half-open circuit breaker.
+- `stale`: polling has not refreshed within the configured `HEALTH_STALE_THRESHOLD_MS` window.
+- `unhealthy`: the keeper is not operational due to missing polls or failed RPC health.
+
+This makes it easier to distinguish slow recovery from critical outages during incident response.
+
 ## P2P Keeper Discovery
 
 The optional P2P layer lets keepers discover each other, advertise load, and split ownership with load-aware rendezvous hashing. It is disabled by default; when disabled or unhealthy, the keeper falls back to configured shard ownership.
@@ -541,6 +552,8 @@ docker compose ps
 ### Data Persistence
 
 The task registry (`data/tasks.json`) is stored in `./keeper/data/` on the host and mounted into the container. It survives container restarts and upgrades automatically.
+
+Note: task IDs are expected to be sequential for a healthy registration history. The keeper exposes allocation summaries that surface missing IDs or duplicate registration events so operators can distinguish delayed task discovery from actual registry drift.
 
 ### Standalone Docker Commands (npm scripts)
 

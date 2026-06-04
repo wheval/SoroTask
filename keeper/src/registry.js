@@ -20,6 +20,7 @@ class TaskRegistry {
     this.contractId = contractId;
     this.taskIds = new Set();
     this.tasks = new Map(); // taskId -> TaskConfig
+    this.duplicateTaskIds = new Set();
     this.lastSeenLedger = options.startLedger || 0;
     this.logger = options.logger || createLogger('registry');
 
@@ -115,6 +116,36 @@ class TaskRegistry {
     }
   }
 
+  /**
+   * Return a summary of task ID allocation and any detected gaps or duplicates.
+   * This helps operators validate whether tasks were registered sequentially and
+   * whether duplicate task registration events were received.
+   * @returns {Object}
+   */
+  getTaskIdAllocationSummary() {
+    const ids = this.getTaskIds();
+    const lowestTaskId = ids.length ? ids[0] : null;
+    const highestTaskId = ids.length ? ids[ids.length - 1] : null;
+    const missingTaskIds = [];
+
+    if (lowestTaskId != null && highestTaskId != null) {
+      for (let taskId = lowestTaskId; taskId <= highestTaskId; taskId += 1) {
+        if (!this.taskIds.has(taskId)) {
+          missingTaskIds.push(taskId);
+        }
+      }
+    }
+
+    return {
+      lowestTaskId,
+      highestTaskId,
+      totalTaskIds: ids.length,
+      missingTaskIds,
+      duplicateTaskIds: Array.from(this.duplicateTaskIds).sort((a, b) => a - b),
+      isStrictlySequential: missingTaskIds.length === 0 && this.duplicateTaskIds.size === 0,
+    };
+  }
+
   // ── Internal ────────────────────────────────────────────────────────────────
 
   async _fetchEvents() {
@@ -198,6 +229,10 @@ class TaskRegistry {
 
     switch (eventType) {
       case 'TaskRegistered':
+        if (this.taskIds.has(taskId)) {
+          this.duplicateTaskIds.add(taskId);
+          this.logger.warn('Duplicate task registration event detected', { taskId });
+        }
         this.taskIds.add(taskId);
         this.updateTask(taskId, {
           id: taskId,
