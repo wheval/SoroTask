@@ -8,8 +8,11 @@ See the centralized [Glossary](../GLOSSARY.md) for definitions of domain-specifi
 
 - [Prerequisites](#prerequisites)
 - [Environment Variables](#environment-variables)
+- [RPC Load Balancer Configuration](#rpc-load-balancer-configuration)
 - [Setup Instructions](#setup-instructions)
+- [P2P Keeper Discovery](#p2p-keeper-discovery)
 - [Dead-Letter Queue](#dead-letter-queue)
+- [Serverless Resolvers](#serverless-resolvers)
 - [Mock Soroban RPC](#mock-soroban-rpc-for-faster-local-testing)
 - [Chaos Testing](#chaos-testing)
 - [Docker Deployment](#docker-deployment)
@@ -82,9 +85,31 @@ KEEPER_SHARD_INDEX=0
 KEEPER_SHARD_COUNT=1
 # KEEPER_SHARD_LABEL=keeper-a
 
+# Optional Postgres shard automation
+DB_SHARD_BASE_COUNT=1
+DB_SHARD_MAX_COUNT=8
+DB_SHARD_SCALE_UP_THRESHOLD=0.75
+DB_SHARD_SCALE_DOWN_THRESHOLD=0.45
+DB_SHARD_USER_CAPACITY=1000
+DB_SHARD_TASK_CAPACITY=5000
+DB_SHARD_AUTO_SCALING=true
+
+# Optional P2P discovery/load-sharing layer
+P2P_ENABLED=false
+# P2P_SHARED_SECRET=replace-with-strong-random-secret
+# P2P_PUBLIC_URL=http://127.0.0.1:4100
+P2P_LISTEN_HOST=0.0.0.0
+P2P_LISTEN_PORT=4100
+# P2P_BOOTSTRAP_PEERS=http://keeper-b.example.com:4100,http://keeper-c.example.com:4100
+
 # Recurring schedule drift thresholds (seconds)
 DRIFT_WARNING_SECONDS=60
 DRIFT_CRITICAL_SECONDS=300
+
+# Optional serverless resolver runtime
+# RESOLVER_FUNCTIONS_CONFIG=./resolvers.json
+RESOLVER_DEFAULT_TIMEOUT_MS=250
+RESOLVER_FAILURE_MODE=skip
 ```
 
 ### Explanation of Variables:
@@ -107,7 +132,72 @@ DRIFT_CRITICAL_SECONDS=300
 - **`KEEPER_ADMIN_TOKEN`**: Bearer token required to call the keeper admin pause/resume API.
 - **`KEEPER_SHARD_INDEX` / `KEEPER_SHARD_COUNT`**: Stable shard assignment controls so multiple keeper instances can partition work without ambiguous ownership.
 - **`KEEPER_SHARD_LABEL`**: Optional human-readable shard identifier used in metrics and logs.
+- **`DB_SHARD_BASE_COUNT` / `DB_SHARD_MAX_COUNT`**: Minimum and maximum Postgres shard counts for automatic scaling. The manager scales shard usage within these bounds.
+- **`DB_SHARD_SCALE_UP_THRESHOLD` / `DB_SHARD_SCALE_DOWN_THRESHOLD`**: Hysteresis thresholds for shard scaling decisions, preventing flapping during load transitions.
+- **`DB_SHARD_USER_CAPACITY` / `DB_SHARD_TASK_CAPACITY`**: Capacity heuristics used to translate active user load and task volume into shard count.
+- **`DB_SHARD_AUTO_SCALING`**: Enable or disable Postgres shard auto-scaling while preserving safe fallback behavior.
+- **`P2P_ENABLED` / `P2P_SHARED_SECRET`**: Enables signed peer discovery and load-aware ownership. See [P2P Keeper Discovery](./docs/p2p-keeper-discovery.md).
+- **`P2P_PUBLIC_URL` / `P2P_BOOTSTRAP_PEERS`**: Advertised peer URL and initial peer list used to join the keeper mesh.
 - **`DRIFT_WARNING_SECONDS` / `DRIFT_CRITICAL_SECONDS`**: Thresholds for recurring execution drift classification.
+- **`RESOLVER_FUNCTIONS_CONFIG`**: Optional JSON file mapping task resolver IDs to sandboxed JS/WASM functions.
+- **`RESOLVER_DEFAULT_TIMEOUT_MS`**: Default per-invocation resolver timeout.
+- **`RESOLVER_FAILURE_MODE`**: `skip` fails closed on resolver errors; `allow` fails open for controlled migrations.
+
+## Serverless Resolvers
+
+The keeper can evaluate custom JavaScript or WASM resolver logic before enqueueing a due task. Resolvers run after interval and gas checks, inside a bounded runtime with static capability checks, payload size limits, and per-call timeouts. Tasks without resolver IDs are unchanged.
+
+See [Serverless Resolver Runtime](./docs/serverless-resolvers.md) for configuration, authoring examples, and the security model.
+
+## RPC Load Balancer Configuration
+
+The keeper supports a custom load balancer for Soroban RPC nodes to improve reliability, performance, and scalability. This enables distributing RPC requests across multiple Soroban RPC endpoints with health monitoring, automatic failover, and load distribution.
+
+### Environment Variables for RPC Load Balancing
+
+To enable the RPC load balancer, configure the following environment variables in your `.env` file:
+
+```env
+# RPC Load Balancer Configuration
+RPC_ENDPOINTS="https://rpc1.soroban.network,https://rpc2.soroban.network,https://rpc3.soroban.network"
+RPC_ENDPOINT_WEIGHTS="3,2,1"
+RPC_HEALTH_CHECK_INTERVAL_MS=30000
+RPC_HEALTH_CHECK_TIMEOUT_MS=5000
+RPC_LOAD_BALANCING_STRATEGY=weighted_round_robin
+```
+
+### Explanation of RPC Load Balancer Variables:
+
+- **`RPC_ENDPOINTS`**: Comma-separated list of RPC URLs to distribute requests across (e.g., "https://rpc1.example.com,https://rpc2.example.com")
+- **`RPC_ENDPOINT_WEIGHTS`**: Optional comma-separated weights for weighted round-robin distribution (e.g., "2,1" - first endpoint gets twice as many requests as second)
+- **`RPC_HEALTH_CHECK_INTERVAL_MS`**: Interval in milliseconds between health checks (default: 30000ms = 30 seconds)
+- **`RPC_HEALTH_CHECK_TIMEOUT_MS`**: Timeout in milliseconds for health check requests (default: 5000ms = 5 seconds)
+- **`RPC_LOAD_BALANCING_STRATEGY`**: Load balancing algorithm to use ("round_robin", "least_connections", or "weighted_round_robin")
+
+### Configuration Notes:
+
+- When using the load balancer, the `SOROBAN_RPC_URL` environment variable is ignored
+- The load balancer automatically handles failover when endpoints become unhealthy
+- Health monitoring uses `getNetwork()` and `getLatestLedger()` calls to verify RPC endpoint availability
+- Metrics for the load balancer are exposed via the standard `/metrics/prometheus` endpoint
+- The load balancer is backward compatible - if only one RPC endpoint is configured, it operates in single-server mode
+
+## Health Status Interpretation
+
+The keeper health endpoint reports richer state than a binary up/down signal. Operators will see:
+
+- `healthy`: keeper is polling and RPC connectivity is working normally.
+- `degraded`: partial issues are present, such as RPC disconnects or a half-open circuit breaker.
+- `stale`: polling has not refreshed within the configured `HEALTH_STALE_THRESHOLD_MS` window.
+- `unhealthy`: the keeper is not operational due to missing polls or failed RPC health.
+
+This makes it easier to distinguish slow recovery from critical outages during incident response.
+
+## P2P Keeper Discovery
+
+The optional P2P layer lets keepers discover each other, advertise load, and split ownership with load-aware rendezvous hashing. It is disabled by default; when disabled or unhealthy, the keeper falls back to configured shard ownership.
+
+See [P2P Keeper Discovery](./docs/p2p-keeper-discovery.md) for setup, security review notes, health fields, and failure behavior.
 
 ### Dead-Letter Queue Configuration
 
@@ -462,6 +552,8 @@ docker compose ps
 ### Data Persistence
 
 The task registry (`data/tasks.json`) is stored in `./keeper/data/` on the host and mounted into the container. It survives container restarts and upgrades automatically.
+
+Note: task IDs are expected to be sequential for a healthy registration history. The keeper exposes allocation summaries that surface missing IDs or duplicate registration events so operators can distinguish delayed task discovery from actual registry drift.
 
 ### Standalone Docker Commands (npm scripts)
 

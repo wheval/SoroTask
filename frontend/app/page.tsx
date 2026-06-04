@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import DateInput from "./components/DateInput";
+import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import PredictiveFailureAnalysisPanel from "./components/PredictiveFailureAnalysisPanel";
+import usePredictiveFailureAnalysis from "./hooks/usePredictiveFailureAnalysis";
 
 export default function Home() {
   const [taskData, setTaskData] = useState({
@@ -10,73 +11,95 @@ export default function Home() {
     interval: '',
     gasBalance: '',
     dueDate: '',
-    parsedDueDate: undefined as Date | undefined
+    parsedDueDate: undefined as Date | undefined,
+    // VRF-related fields
+    useVrf: false,
+    vrfCallbackFunction: '',
+    vrfCallbackArgs: ''
   });
+  const initialForm = useRef(form);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
-  const handleDateChange = (value: string, parsedDate?: Date) => {
-    setTaskData(prev => ({
-      ...prev,
-      dueDate: value,
-      parsedDueDate: parsedDate
-    }));
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSave({
+      ...task,
+      contractAddress: form.contractAddress.trim(),
+      functionName: form.functionName.trim(),
+      interval: Number(form.interval) || task.interval,
+      gasBalance: Number(form.gasBalance) || task.gasBalance,
+    });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('Task submitted:', taskData);
-    // Handle task submission logic here
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    },
+    [onClose]
+  );
+
+  const confirmDiscard = () => {
+    const changed =
+      form.contractAddress !== initialForm.current.contractAddress ||
+      form.functionName !== initialForm.current.functionName ||
+      form.interval !== initialForm.current.interval ||
+      form.gasBalance !== initialForm.current.gasBalance;
+
+    if (!changed) {
+      return true;
+    }
+
+    return window.confirm("Discard unsaved changes?");
   };
 
-  const onReset = () => {
-    if (confirmDiscard()) setForm(EMPTY_FORM);
+  const handleBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && confirmDiscard()) {
+      onClose();
+    }
+  };
+
+  const handleCancel = () => {
+    if (confirmDiscard()) {
+      onClose();
+    }
   };
 
   return (
-    /* Backdrop – clicking outside closes the dialog */
     <div
-      className="dialog-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+      role="presentation"
+      onClick={handleBackdropClick}
     >
-      {/* Dialog container with role="dialog" and focus trap */}
       <div
-        ref={trapRef}
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="edit-dialog-title"
-        aria-describedby="edit-dialog-desc"
+        aria-labelledby="edit-task-dialog-title"
+        className="w-full max-w-lg rounded-3xl border border-neutral-700/80 bg-neutral-950 p-6 shadow-2xl shadow-black/40"
         onKeyDown={handleKeyDown}
-        className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4"
       >
-        <h2 id="edit-dialog-title" className="text-lg font-bold text-neutral-100">
+        <h2 id="edit-task-dialog-title" className="text-xl font-semibold text-neutral-100 mb-4">
           Edit Task #{task.id}
         </h2>
-        <p id="edit-dialog-desc" className="sr-only">
-          Update the details of automation task {task.id}. Press Escape to cancel.
-        </p>
-
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label
-              htmlFor="edit-contract"
-              className="block text-sm font-medium text-neutral-400 mb-1"
-            >
+            <label htmlFor="edit-contract" className="block text-sm font-medium text-neutral-400 mb-1">
               Target Contract Address
             </label>
             <input
               id="edit-contract"
               type="text"
               value={form.contractAddress}
-              onChange={(e) => setForm({ ...form, contractAddress: e.target.value })}
+              onChange={(event) => setForm({ ...form, contractAddress: event.target.value })}
               required
               autoComplete="off"
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm text-neutral-100"
+              className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
 
-      <main className="container mx-auto px-6 py-12">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
           <div>
             <h2 className="text-3xl font-bold">Your Keeper Dashboard</h2>
             <p className="text-neutral-400">Create, manage, and reorder recurring tasks with instant feedback.</p>
@@ -147,6 +170,41 @@ export default function Home() {
                     className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
                   />
                 </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="use-vrf"
+                    checked={taskData.useVrf}
+                    onChange={(e) => setTaskData(prev => ({ ...prev, useVrf: e.target.checked }))}
+                    className="h-4 w-4 text-blue-600 border-neutral-600 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="use-vrf" className="ml-2 block text-sm font-medium text-neutral-400">
+                    Use Verifiable Random Function (VRF)
+                  </label>
+                </div>
+                {taskData.useVrf && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-400 mb-1">VRF Callback Function</label>
+                      <input 
+                        type="text" 
+                        placeholder="fulfillRandomness" 
+                        value={taskData.vrfCallbackFunction}
+                        onChange={(e) => setTaskData(prev => ({ ...prev, vrfCallbackFunction: e.target.value }))}
+                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-400 mb-1">VRF Callback Arguments (JSON)</label>
+                      <textarea 
+                        placeholder='{"randomNumber": "$RANDOM"}'
+                        value={taskData.vrfCallbackArgs}
+                        onChange={(e) => setTaskData(prev => ({ ...prev, vrfCallbackArgs: e.target.value }))}
+                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm h-24" 
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
@@ -379,12 +437,9 @@ export default function Home() {
             <div ref={logsEndRef} />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label
-                htmlFor="edit-interval"
-                className="block text-sm font-medium text-neutral-400 mb-1"
-              >
+              <label htmlFor="edit-interval" className="block text-sm font-medium text-neutral-400 mb-1">
                 Interval (seconds)
               </label>
               <input
@@ -392,16 +447,13 @@ export default function Home() {
                 type="number"
                 min={1}
                 value={form.interval}
-                onChange={(e) => setForm({ ...form, interval: Number(e.target.value) })}
+                onChange={(event) => setForm({ ...form, interval: event.target.value })}
                 required
-                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm text-neutral-100"
+                className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
             <div>
-              <label
-                htmlFor="edit-gas"
-                className="block text-sm font-medium text-neutral-400 mb-1"
-              >
+              <label htmlFor="edit-gas" className="block text-sm font-medium text-neutral-400 mb-1">
                 Gas Balance (XLM)
               </label>
               <input
@@ -409,35 +461,34 @@ export default function Home() {
                 type="number"
                 min={0}
                 value={form.gasBalance}
-                onChange={(e) => setForm({ ...form, gasBalance: Number(e.target.value) })}
+                onChange={(event) => setForm({ ...form, gasBalance: event.target.value })}
                 required
-                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm text-neutral-100"
+                className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <button
-              type="submit"
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors"
-            >
-              Save Changes
-            </button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={onClose}
-              className="flex-1 bg-neutral-700 hover:bg-neutral-600 text-neutral-100 font-medium py-2 rounded-lg transition-colors"
+              onClick={handleCancel}
+              className="rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm font-medium text-neutral-200 transition hover:border-neutral-500"
             >
               Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-500"
+            >
+              Save Changes
             </button>
           </div>
         </form>
       </div>
     </div>
-  )
+  );
 }
 
-/* ─── Task Card (Your Tasks) ─────────────────────────────────────────── */
 interface TaskCardProps {
   task: Task;
   onEdit: (task: Task) => void;
@@ -451,37 +502,28 @@ function TaskCard({ task, onEdit, onToggle, onDelete }: TaskCardProps) {
   return (
     <article
       aria-label={`Automation task ${task.id}: ${task.functionName} on ${task.contractAddress}`}
-      className="bg-neutral-800 border border-neutral-700 rounded-xl p-4 space-y-3"
+      className="rounded-3xl border border-neutral-700/80 bg-neutral-900/70 p-5 shadow-xl shadow-black/20"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="space-y-0.5">
-          <p className="font-mono text-sm text-neutral-300 font-medium">
-            #{task.id}
-          </p>
-          <p className="font-mono text-xs text-neutral-500 truncate max-w-[14rem]">
-            {task.contractAddress}
-          </p>
-          <p className="text-sm text-neutral-200">
-            <span className="sr-only">Function: </span>
-            {task.functionName}
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">Task #{task.id}</p>
+          <p className="font-mono text-sm text-neutral-300 truncate max-w-[18rem]">{task.contractAddress}</p>
+          <p className="text-base font-semibold text-neutral-100">{task.functionName}</p>
         </div>
-
-        {/* Status badge */}
         <span
           role="status"
           aria-label={`Task status: ${task.status}`}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
             isPaused
-              ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
-              : "bg-green-500/10 text-green-400 border-green-500/20"
+              ? "bg-yellow-500/10 text-yellow-300 border border-yellow-500/20"
+              : "bg-green-500/10 text-green-300 border border-green-500/20"
           }`}
         >
           {isPaused ? "Paused" : "Active"}
         </span>
       </div>
 
-      <dl className="flex gap-4 text-xs text-neutral-500">
+      <dl className="mt-4 grid gap-3 text-sm text-neutral-400">
         <div>
           <dt className="sr-only">Interval</dt>
           <dd>Every {task.interval}s</dd>
@@ -492,30 +534,29 @@ function TaskCard({ task, onEdit, onToggle, onDelete }: TaskCardProps) {
         </div>
       </dl>
 
-      {/* Action buttons – all keyboard-accessible */}
-      <div role="group" aria-label={`Actions for task ${task.id}`} className="flex gap-2 pt-1">
+      <div role="group" aria-label={`Actions for task ${task.id}`} className="mt-5 grid gap-2 sm:grid-cols-3">
         <button
-          id={`task-edit-${task.id}`}
+          type="button"
           onClick={() => onEdit(task)}
           aria-label={`Edit task ${task.id}`}
-          className="flex-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 px-3 py-1.5 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="rounded-2xl bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
         >
           Edit
         </button>
         <button
-          id={`task-toggle-${task.id}`}
+          type="button"
           onClick={() => onToggle(task.id)}
           aria-label={isPaused ? `Resume task ${task.id}` : `Pause task ${task.id}`}
           aria-pressed={isPaused}
-          className="flex-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 px-3 py-1.5 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="rounded-2xl bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
         >
           {isPaused ? "Resume" : "Pause"}
         </button>
         <button
-          id={`task-delete-${task.id}`}
+          type="button"
           onClick={() => onDelete(task.id)}
           aria-label={`Delete task ${task.id}`}
-          className="flex-1 text-xs bg-red-900/40 hover:bg-red-700/50 text-red-400 px-3 py-1.5 rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-red-500"
+          className="rounded-2xl bg-red-600/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-600/20"
         >
           Delete
         </button>
@@ -524,7 +565,6 @@ function TaskCard({ task, onEdit, onToggle, onDelete }: TaskCardProps) {
   );
 }
 
-/* ─── Live Region for announcements ─────────────────────────────────── */
 function LiveRegion({ message }: { message: string }) {
   return (
     <div
@@ -538,50 +578,76 @@ function LiveRegion({ message }: { message: string }) {
   );
 }
 
-/* ─── Main Page ──────────────────────────────────────────────────────── */
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [logs] = useState<LogEntry[]>(MOCK_LOGS);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [announcement, setAnnouncement] = useState("");
-
-  /* ── Create-task form state ── */
   const [contractAddress, setContractAddress] = useState("");
   const [functionName, setFunctionName] = useState("");
-  const [interval, setIntervalVal] = useState("");
+  const [interval, setInterval] = useState("");
   const [gasBalance, setGasBalance] = useState("");
   const [formError, setFormError] = useState("");
+  const [criticalWarningAcknowledged, setCriticalWarningAcknowledged] = useState(false);
+  const nextTaskId = useRef(1);
 
-  const nextId = useRef(1);
+  const predictionInput = useMemo(
+    () => ({
+      contractAddress: contractAddress.trim(),
+      functionName: functionName.trim(),
+      interval: Number(interval),
+      gasBalance: Number(gasBalance),
+    }),
+    [contractAddress, functionName, interval, gasBalance]
+  );
 
-  /* Helper to announce screen-reader messages */
-  const announce = useCallback((msg: string) => {
+  const analysis = usePredictiveFailureAnalysis(predictionInput);
+
+  const announce = useCallback((message: string) => {
     setAnnouncement("");
-    // Defer to guarantee the aria-live region fires even for identical strings
-    requestAnimationFrame(() => setAnnouncement(msg));
+    requestAnimationFrame(() => setAnnouncement(message));
   }, []);
 
-  /* ── Register task ── */
+  const resetForm = () => {
+    setContractAddress("");
+    setFunctionName("");
+    setInterval("");
+    setGasBalance("");
+    setFormError("");
+    setCriticalWarningAcknowledged(false);
+  };
+
   const handleRegister = useCallback(
-    (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
       setFormError("");
 
       if (!contractAddress.trim() || !functionName.trim()) {
         setFormError("Contract address and function name are required.");
         return;
       }
+
       if (Number(interval) < 1) {
         setFormError("Interval must be at least 1 second.");
         return;
       }
+
       if (Number(gasBalance) < 0) {
         setFormError("Gas balance cannot be negative.");
         return;
       }
 
+      if (analysis.status === "success" && analysis.prediction?.riskLevel === "critical") {
+        if (!criticalWarningAcknowledged) {
+          setFormError(
+            "This configuration is predicted to fail critically. Submit again to register with caution."
+          );
+          setCriticalWarningAcknowledged(true);
+          return;
+        }
+      }
+
       const newTask: Task = {
-        id: nextId.current++,
+        id: nextTaskId.current++,
         contractAddress: contractAddress.trim(),
         functionName: functionName.trim(),
         interval: Number(interval) || 3600,
@@ -589,63 +655,52 @@ export default function Home() {
         status: "active",
       };
 
-      setTasks((prev) => [newTask, ...prev]);
-      setContractAddress("");
-      setFunctionName("");
-      setIntervalVal("");
-      setGasBalance("");
+      setTasks((current) => [newTask, ...current]);
       announce(`Task ${newTask.id} registered for ${newTask.functionName}.`);
+      resetForm();
     },
-    [contractAddress, functionName, interval, gasBalance, announce]
+    [analysis.prediction?.riskLevel, analysis.status, criticalWarningAcknowledged, contractAddress, functionName, interval, gasBalance, announce]
   );
 
-  /* ── Edit task ── */
   const handleSaveEdit = useCallback(
-    (updated: Task) => {
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    (updatedTask: Task) => {
+      setTasks((current) => current.map((candidate) => (candidate.id === updatedTask.id ? updatedTask : candidate)));
       setEditingTask(null);
-      announce(`Task ${updated.id} updated.`);
+      announce(`Task ${updatedTask.id} updated.`);
     },
     [announce]
   );
 
-  /* ── Toggle task status ── */
   const handleToggle = useCallback(
-    (id: number) => {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === id ? { ...t, status: t.status === "active" ? "paused" : "active" } : t
+    (taskId: number) => {
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === taskId
+            ? { ...task, status: task.status === "active" ? "paused" : "active" }
+            : task
         )
       );
-      const task = tasks.find((t) => t.id === id);
-      if (task) {
-        const next = task.status === "active" ? "paused" : "resumed";
-        announce(`Task ${id} ${next}.`);
-      }
+      announce(`Task ${taskId} ${tasks.find((task) => task.id === taskId)?.status === "active" ? "paused" : "resumed"}.`);
     },
     [tasks, announce]
   );
 
-  /* ── Delete task ── */
   const handleDelete = useCallback(
-    (id: number) => {
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-      announce(`Task ${id} deleted.`);
+    (taskId: number) => {
+      setTasks((current) => current.filter((task) => task.id !== taskId));
+      announce(`Task ${taskId} deleted.`);
     },
     [announce]
   );
 
   return (
     <>
-      {/* ── Skip-to-content link (first focusable element on page) ── */}
       <a href="#main-content" className="skip-nav">
         Skip to main content
       </a>
 
-      {/* ── Screen-reader live region ── */}
       <LiveRegion message={announcement} />
 
-      {/* ── Edit-task dialog (focus-trapped, Escape closes) ── */}
       {editingTask && (
         <EditTaskDialog
           task={editingTask}
@@ -654,55 +709,45 @@ export default function Home() {
         />
       )}
 
-      <div className="min-h-screen bg-neutral-900 text-neutral-100 font-sans">
-        {/* ── Header ── */}
-        <header className="border-b border-neutral-800 bg-neutral-950/50 backdrop-blur-md sticky top-0 z-10">
-          <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <div
-                aria-hidden="true"
-                className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20"
-              >
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans">
+        <header className="sticky top-0 z-10 border-b border-neutral-800/70 bg-neutral-950/95 backdrop-blur-lg">
+          <div className="container mx-auto flex flex-wrap items-center justify-between gap-4 px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500 text-lg font-bold text-white">
                 S
               </div>
-              {/* Single h1 per page for correct heading hierarchy */}
-              <h1 className="text-xl font-bold tracking-tight">SoroTask</h1>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight">SoroTask</h1>
+                <p className="text-sm text-neutral-400">Predict task failure risk before registration.</p>
+              </div>
             </div>
-
             <button
               id="connect-wallet-btn"
               aria-label="Connect your Stellar wallet"
-              className="bg-neutral-100 text-neutral-900 px-4 py-2 rounded-md font-medium hover:bg-neutral-200 transition-colors"
+              className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold text-neutral-100 transition hover:bg-neutral-800"
             >
-              Connect Wallet
+              {isWalletConnected ? `${walletAddress?.slice(0, 6)}...${walletAddress?.slice(-4)}` : "Connect Wallet"}
             </button>
           </div>
         </header>
 
-        {/* ── Main content ── */}
-        <main id="main-content" tabIndex={-1} className="container mx-auto px-6 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+        <main id="main-content" className="container mx-auto px-6 py-12">
+          <div className="grid gap-12 xl:grid-cols-[1.2fr_0.9fr]">
+            <section aria-labelledby="create-task-heading" className="space-y-6">
+              <div className="space-y-2">
+                <p className="text-sm uppercase tracking-[0.24em] text-blue-400">Predictive Execution</p>
+                <h2 id="create-task-heading" className="text-3xl font-semibold text-white">
+                  Create automation task
+                </h2>
+              </div>
 
-            {/* ── Create Task Section ── */}
-            <section aria-labelledby="create-task-heading">
-              <h2 id="create-task-heading" className="text-2xl font-bold mb-6">
-                Create Automation Task
-              </h2>
-
-              <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 shadow-xl">
-                <form
-                  id="create-task-form"
-                  onSubmit={handleRegister}
-                  noValidate
-                  aria-label="Register a new automation task"
-                >
-                  {/* Inline form error – visually and announced to screen readers */}
+              <div className="rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-6 shadow-xl shadow-black/20">
+                <form onSubmit={handleRegister} noValidate className="space-y-6" aria-describedby={formError ? "task-form-error" : undefined}>
                   {formError && (
                     <div
+                      id="task-form-error"
                       role="alert"
-                      aria-live="assertive"
-                      id="form-error"
-                      className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2"
+                      className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"
                     >
                       {formError}
                     </div>
@@ -710,129 +755,108 @@ export default function Home() {
 
                   <div className="space-y-4">
                     <div>
-                      <label
-                        htmlFor="contract-address"
-                        className="block text-sm font-medium text-neutral-400 mb-1"
-                      >
-                        Target Contract Address{" "}
-                        <span aria-hidden="true" className="text-red-400">*</span>
+                      <label htmlFor="contract-address" className="block text-sm font-medium text-neutral-400 mb-1">
+                        Target Contract Address
                       </label>
                       <input
                         id="contract-address"
                         type="text"
-                        placeholder="C..."
                         value={contractAddress}
-                        onChange={(e) => setContractAddress(e.target.value)}
-                        required
-                        aria-required="true"
-                        aria-describedby={formError ? "form-error" : undefined}
+                        onChange={(event) => setContractAddress(event.target.value)}
+                        placeholder="C..."
                         autoComplete="off"
-                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                        required
+                        className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                       />
                     </div>
 
                     <div>
-                      <label
-                        htmlFor="function-name"
-                        className="block text-sm font-medium text-neutral-400 mb-1"
-                      >
-                        Function Name{" "}
-                        <span aria-hidden="true" className="text-red-400">*</span>
+                      <label htmlFor="function-name" className="block text-sm font-medium text-neutral-400 mb-1">
+                        Function Name
                       </label>
                       <input
                         id="function-name"
                         type="text"
-                        placeholder="harvest_yield"
                         value={functionName}
-                        onChange={(e) => setFunctionName(e.target.value)}
-                        required
-                        aria-required="true"
+                        onChange={(event) => setFunctionName(event.target.value)}
+                        placeholder="harvest_yield"
                         autoComplete="off"
-                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                        required
+                        className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div>
-                        <label
-                          htmlFor="interval-seconds"
-                          className="block text-sm font-medium text-neutral-400 mb-1"
-                        >
+                        <label htmlFor="interval-seconds" className="block text-sm font-medium text-neutral-400 mb-1">
                           Interval (seconds)
                         </label>
                         <input
                           id="interval-seconds"
                           type="number"
-                          placeholder="3600"
                           min={1}
                           value={interval}
-                          onChange={(e) => setIntervalVal(e.target.value)}
-                          className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                          onChange={(event) => setInterval(event.target.value)}
+                          placeholder="3600"
+                          className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                         />
                       </div>
                       <div>
-                        <label
-                          htmlFor="gas-balance"
-                          className="block text-sm font-medium text-neutral-400 mb-1"
-                        >
+                        <label htmlFor="gas-balance" className="block text-sm font-medium text-neutral-400 mb-1">
                           Gas Balance (XLM)
                         </label>
                         <input
                           id="gas-balance"
                           type="number"
-                          placeholder="10"
                           min={0}
                           value={gasBalance}
-                          onChange={(e) => setGasBalance(e.target.value)}
-                          className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm"
+                          onChange={(event) => setGasBalance(event.target.value)}
+                          placeholder="10"
+                          className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                         />
                       </div>
                     </div>
-
-                    <button
-                      id="register-task-btn"
-                      type="submit"
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20"
-                    >
-                      Register Task
-                    </button>
                   </div>
+
+                  <PredictiveFailureAnalysisPanel
+                    status={analysis.status}
+                    prediction={analysis.prediction}
+                    error={analysis.error}
+                  />
+
+                  <button
+                    type="submit"
+                    className="w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                  >
+                    Register Task
+                  </button>
                 </form>
               </div>
             </section>
 
-            {/* ── Your Tasks Section ── */}
-            <section aria-labelledby="your-tasks-heading">
-              <h2 id="your-tasks-heading" className="text-2xl font-bold mb-6">
-                Your Tasks
-                {tasks.length > 0 && (
-                  <span className="ml-2 text-base font-normal text-neutral-500">
-                    ({tasks.length})
-                  </span>
-                )}
-              </h2>
+            <section aria-labelledby="your-tasks-heading" className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 id="your-tasks-heading" className="text-3xl font-semibold text-white">
+                    Your tasks
+                  </h2>
+                  <p className="text-sm text-neutral-400">Tasks are validated before registration and shown in one place.</p>
+                </div>
+                <span className="rounded-full border border-neutral-700/80 bg-neutral-900/70 px-3 py-2 text-sm text-neutral-300">
+                  {tasks.length} total
+                </span>
+              </div>
 
               {tasks.length === 0 ? (
-                <div
-                  aria-live="polite"
-                  className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 min-h-[300px] flex flex-col items-center justify-center text-neutral-500 shadow-xl"
-                >
-                  <p>No tasks registered yet.</p>
-                  <p className="text-sm mt-1">Fill in the form to create your first automation task.</p>
+                <div aria-live="polite" className="rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-8 text-center text-neutral-500">
+                  <p className="text-base font-medium">No tasks registered yet.</p>
+                  <p className="mt-2 text-sm text-neutral-400">Fill the form to see predictive execution warnings before registration.</p>
                 </div>
               ) : (
-                <ul
-                  aria-label="Registered automation tasks"
-                  className="space-y-4"
-                >
+                <ul aria-label="Registered automation tasks" className="space-y-4">
                   {tasks.map((task) => (
                     <li key={task.id}>
-                      <TaskCard
-                        task={task}
-                        onEdit={setEditingTask}
-                        onToggle={handleToggle}
-                        onDelete={handleDelete}
-                      />
+                      <TaskCard task={task} onEdit={setEditingTask} onToggle={handleToggle} onDelete={handleDelete} />
                     </li>
                   ))}
                 </ul>
@@ -840,56 +864,28 @@ export default function Home() {
             </section>
           </div>
 
-          {/* ── Execution Logs ── */}
-          <section aria-labelledby="exec-logs-heading" className="mt-16">
-            <h2 id="exec-logs-heading" className="text-2xl font-bold mb-6">
-              Execution Logs
-            </h2>
-            <div className="overflow-x-auto overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
-              <table
-                aria-label="Task execution logs"
-                className="w-full text-left text-sm text-neutral-400"
-              >
-                <caption className="sr-only">
-                  A log of recent task executions showing task ID, target contract, keeper, status
-                  and timestamp.
-                </caption>
-                <thead className="bg-neutral-800/80 text-neutral-200 backdrop-blur-sm">
-                  <tr>
-                    <th scope="col" className="px-6 py-4 font-medium">Task ID</th>
-                    <th scope="col" className="px-6 py-4 font-medium">Target</th>
-                    <th scope="col" className="px-6 py-4 font-medium">Keeper</th>
-                    <th scope="col" className="px-6 py-4 font-medium">Status</th>
-                    <th scope="col" className="px-6 py-4 font-medium">Timestamp</th>
+          <section className="mt-16 rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-6 shadow-xl shadow-black/10">
+            <h2 className="text-2xl font-semibold text-white">Execution logs</h2>
+            <p className="mt-1 text-sm text-neutral-400">A small example audit trail for simulated task execution outcomes.</p>
+
+            <div className="mt-6 overflow-x-auto">
+              <table className="min-w-full border-separate border-spacing-0 text-left text-sm text-neutral-300">
+                <caption className="sr-only">Recent task execution logs.</caption>
+                <thead>
+                  <tr className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                    <th className="px-4 py-3">Task ID</th>
+                    <th className="px-4 py-3">Keeper</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">When</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-800 bg-neutral-900/50">
-                  {logs.map((log) => (
-                    <tr
-                      key={log.id}
-                      className="hover:bg-neutral-800/50 transition-colors"
-                    >
-                      <td className="px-6 py-4 font-mono text-neutral-300">
-                        #{log.taskId}
-                      </td>
-                      <td className="px-6 py-4 font-mono">{log.target}</td>
-                      <td className="px-6 py-4 font-mono">{log.keeper}</td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                            log.status === "success"
-                              ? "bg-green-500/10 text-green-400 border-green-500/20"
-                              : log.status === "failed"
-                              ? "bg-red-500/10 text-red-400 border-red-500/20"
-                              : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
-                          }`}
-                        >
-                          {log.status.charAt(0).toUpperCase() + log.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <time>{log.timestamp}</time>
-                      </td>
+                <tbody className="divide-y divide-neutral-800 border-t border-neutral-800">
+                  {MOCK_LOGS.map((entry) => (
+                    <tr key={entry.id} className="odd:bg-neutral-950 even:bg-neutral-900">
+                      <td className="px-4 py-3 font-mono text-neutral-200">#{entry.taskId}</td>
+                      <td className="px-4 py-3 text-neutral-300">{entry.keeper}</td>
+                      <td className="px-4 py-3 text-neutral-200">{entry.status}</td>
+                      <td className="px-4 py-3 text-neutral-400">{entry.timestamp}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,0 +1,16 @@
+{
+  "testkey": {
+    "keyId": "testkey",
+    "publicPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtYxJV8CpS8HLjo3vFwFrc5hXTHWtKTKESzDaSI6Nt5U=\n-----END PUBLIC KEY-----\n",
+    "algorithm": "ed25519",
+    "active": true,
+    "createdAt": "2026-06-01T13:25:56.063Z"
+  },
+  "k1": {
+    "keyId": "k1",
+    "publicPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEACu2Y/F98xCZDTyFwaFUX/ERg2u87ELNkZqVtcX7XgLE=\n-----END PUBLIC KEY-----\n",
+    "algorithm": "ed25519",
+    "active": true,
+    "createdAt": "2026-06-01T13:25:56.069Z"
+  }
+}

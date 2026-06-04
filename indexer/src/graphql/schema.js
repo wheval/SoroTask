@@ -1,0 +1,108 @@
+const { gql } = require('apollo-server-express');
+
+const typeDefs = gql`
+  """
+  Standard response for authentication.
+  """
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
+
+  """
+  User representation within the system.
+  """
+  type User {
+    id: ID!
+    address: String!
+    role: String!
+  }
+
+  """
+  Represents a scheduled Keeper Task.
+  """
+  type Task {
+    task_id: ID!
+    creator: String!
+    target: String!
+    function: String!
+    args_json: String
+    resolver: String
+    interval: Int!
+    last_run: Int!
+    gas_balance: String!
+    is_active: Boolean!
+    
+    # Restricted fields (Admin or Owner only)
+    whitelist_json: String
+    blocked_by_json: String
+    updated_at: String
+    last_reconciled_at: String
+  }
+
+  """
+  Represents a contract event indexed by the system.
+  """
+  type Event {
+    id: ID!
+    ledger_sequence: Int!
+    contract_id: String!
+    event_name: String!
+    task_id: Int
+    data_json: String!
+    processed_at: String!
+  }
+
+  """
+  Represents a reconciliation log.
+  Restricted to Operators and Admins.
+  """
+  type ReconciliationLog {
+    id: ID!
+    task_id: Int
+    status: String!
+    details_json: String
+    created_at: String!
+  }
+
+  type Query {
+    """
+    Get the currently authenticated user.
+    """
+    me: User
+
+    """
+    Retrieve all tasks. Accessible by anyone.
+    """
+    tasks(limit: Int, offset: Int): [Task!]!
+
+    """
+    Retrieve a specific task by ID. Accessible by anyone.
+    """
+    task(id: ID!): Task
+
+    """
+    Retrieve events. Optionally filter by task_id.
+    """
+    events(task_id: Int, limit: Int, offset: Int): [Event!]!
+
+    """
+    Retrieve reconciliation logs. Restricted to OPERATOR.
+    """
+    reconciliationLogs(task_id: Int, limit: Int, offset: Int): [ReconciliationLog!]!
+  }
+
+  type Mutation {
+    """
+    Generate a demo JWT token for testing. (In production, replace with real auth).
+    """
+    loginDemo(address: String!, role: String): AuthPayload!
+
+    """
+    Force a task to pause. Restricted to ADMIN or Task Creator.
+    """
+    pauseTask(id: ID!): Task
+  }
+`;
+
+module.exports = { typeDefs };

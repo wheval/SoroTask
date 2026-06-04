@@ -255,3 +255,56 @@ describe("focusTaskId prop", () => {
     expect(screen.getByTestId("node-d")).toBeInTheDocument();
   });
 });
+
+// ── large graph banner ────────────────────────────────────────────────────────
+
+describe("large graph banner", () => {
+  it("does not show the large-graph warning for small graphs", () => {
+    seedStore([makeTask("a"), makeTask("b")], [{ fromId: "a", toId: "b" }]);
+    render(<TaskDependencyGraph />);
+    expect(screen.queryByTestId("graph-large-warning")).not.toBeInTheDocument();
+  });
+
+  it("shows the large-graph warning above 200 nodes", () => {
+    const tasks: Task[] = [];
+    const deps: { fromId: string; toId: string }[] = [];
+    for (let i = 0; i < 250; i++) tasks.push(makeTask(`n${i}`));
+    for (let i = 0; i < 249; i++) {
+      deps.push({ fromId: `n${i}`, toId: `n${i + 1}` });
+    }
+    seedStore(tasks, deps);
+    render(<TaskDependencyGraph />);
+    expect(screen.getByTestId("graph-large-warning")).toBeInTheDocument();
+    expect(
+      screen.getByText(/showing top 200 nodes/i)
+    ).toBeInTheDocument();
+  });
+});
+
+// ── accessibility & hints ─────────────────────────────────────────────────────
+
+describe("accessibility and hints", () => {
+  beforeEach(() => {
+    seedStore([makeTask("a"), makeTask("b")], [{ fromId: "a", toId: "b" }]);
+  });
+
+  it("renders the keyboard hint text", () => {
+    render(<TaskDependencyGraph />);
+    expect(screen.getByTestId("graph-hint")).toHaveTextContent(
+      /click a node to select it/i
+    );
+  });
+
+  it("announces the selected task in the live region", () => {
+    render(<TaskDependencyGraph />);
+    fireEvent.click(screen.getByTestId("node-a"));
+    expect(screen.getByTestId("graph-live-region")).toHaveTextContent(
+      "Selected Task: Task a"
+    );
+  });
+
+  it("has an empty live region when nothing is selected", () => {
+    render(<TaskDependencyGraph />);
+    expect(screen.getByTestId("graph-live-region")).toHaveTextContent("");
+  });
+});
