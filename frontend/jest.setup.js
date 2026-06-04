@@ -1,6 +1,25 @@
 require('@testing-library/jest-dom')
 const React = require('react')
 
+if (typeof global.fetch !== 'function') {
+  global.fetch = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: async () => ({
+        riskScore: 18,
+        riskLevel: 'low',
+        confidence: 'high',
+        summary: 'Low risk predicted by test fallback.',
+        evidence: {
+          gasShortfall: false,
+          intervalTooFast: false,
+          contractReputation: 'Mock fallback prediction executed.',
+        },
+      } ),
+    })
+  )
+}
+
 // Mock environment variables for tests
 process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3000'
 
