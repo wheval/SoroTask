@@ -1,899 +1,361 @@
-"use client";
+import Link from "next/link";
+import {
+  FiActivity,
+  FiArrowRight,
+  FiBarChart2,
+  FiCheckCircle,
+  FiClock,
+  FiCpu,
+  FiGrid,
+  FiLayers,
+  FiPlayCircle,
+  FiShield,
+  FiZap,
+} from "react-icons/fi";
 
-import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
-import PredictiveFailureAnalysisPanel from "./components/PredictiveFailureAnalysisPanel";
-import usePredictiveFailureAnalysis from "./hooks/usePredictiveFailureAnalysis";
+const stats = [
+  { label: "Automation uptime", value: "99.8%", tone: "text-emerald-300" },
+  { label: "Avg execution lag", value: "1.4s", tone: "text-sky-300" },
+  { label: "Keeper routes", value: "24", tone: "text-amber-300" },
+];
 
-export default function Home() {
-  const [taskData, setTaskData] = useState({
-    contractAddress: '',
-    functionName: '',
-    interval: '',
-    gasBalance: '',
-    dueDate: '',
-    parsedDueDate: undefined as Date | undefined,
-    // VRF-related fields
-    useVrf: false,
-    vrfCallbackFunction: '',
-    vrfCallbackArgs: ''
-  });
-  const initialForm = useRef(form);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+const commandRows = [
+  {
+    name: "Harvest vault yield",
+    network: "Stellar",
+    status: "Ready",
+    eta: "32s",
+    tone: "bg-emerald-400",
+  },
+  {
+    name: "Rebalance treasury",
+    network: "Soroban",
+    status: "Queued",
+    eta: "4m",
+    tone: "bg-sky-400",
+  },
+  {
+    name: "Sweep idle liquidity",
+    network: "Cross-chain",
+    status: "Watching",
+    eta: "12m",
+    tone: "bg-amber-300",
+  },
+];
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    onSave({
-      ...task,
-      contractAddress: form.contractAddress.trim(),
-      functionName: form.functionName.trim(),
-      interval: Number(form.interval) || task.interval,
-      gasBalance: Number(form.gasBalance) || task.gasBalance,
-    });
-  };
+const quickLinks = [
+  {
+    href: "/tasks",
+    title: "Task Console",
+    description: "Create, fund, pause, and inspect recurring contract calls.",
+    icon: FiPlayCircle,
+    accent: "from-emerald-400 to-teal-300",
+  },
+  {
+    href: "/board",
+    title: "Execution Board",
+    description: "Triage active automations by status, priority, and owner.",
+    icon: FiGrid,
+    accent: "from-sky-400 to-cyan-300",
+  },
+  {
+    href: "/dashboard",
+    title: "Live Dashboard",
+    description:
+      "Track volume, latency, failures, and task health at a glance.",
+    icon: FiBarChart2,
+    accent: "from-amber-300 to-orange-400",
+  },
+  {
+    href: "/keeper-metrics",
+    title: "Keeper Metrics",
+    description: "Monitor nodes, gas pressure, retries, and operational risk.",
+    icon: FiCpu,
+    accent: "from-rose-400 to-red-300",
+  },
+];
 
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    },
-    [onClose]
-  );
+const trustSignals = [
+  { icon: FiShield, label: "Non-custodial task control" },
+  { icon: FiClock, label: "Interval-aware execution" },
+  { icon: FiLayers, label: "Dependency-ready workflows" },
+];
 
-  const confirmDiscard = () => {
-    const changed =
-      form.contractAddress !== initialForm.current.contractAddress ||
-      form.functionName !== initialForm.current.functionName ||
-      form.interval !== initialForm.current.interval ||
-      form.gasBalance !== initialForm.current.gasBalance;
-
-    if (!changed) {
-      return true;
-    }
-
-    return window.confirm("Discard unsaved changes?");
-  };
-
-  const handleBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget && confirmDiscard()) {
-      onClose();
-    }
-  };
-
-  const handleCancel = () => {
-    if (confirmDiscard()) {
-      onClose();
-    }
-  };
-
+export default function HomePage() {
   return (
-    <div
-      className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
-      role="presentation"
-      onClick={handleBackdropClick}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-task-dialog-title"
-        className="w-full max-w-lg rounded-3xl border border-neutral-700/80 bg-neutral-950 p-6 shadow-2xl shadow-black/40"
-        onKeyDown={handleKeyDown}
-      >
-        <h2 id="edit-task-dialog-title" className="text-xl font-semibold text-neutral-100 mb-4">
-          Edit Task #{task.id}
-        </h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="edit-contract" className="block text-sm font-medium text-neutral-400 mb-1">
-              Target Contract Address
-            </label>
-            <input
-              id="edit-contract"
-              type="text"
-              value={form.contractAddress}
-              onChange={(event) => setForm({ ...form, contractAddress: event.target.value })}
-              required
-              autoComplete="off"
-              className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-            />
-          </div>
+    <main className="min-h-screen overflow-hidden bg-[#07100f] text-slate-50">
+      <section className="relative isolate min-h-screen px-5 py-6 sm:px-8 lg:px-12">
+        <div className="absolute inset-0 -z-10 bg-[linear-gradient(135deg,rgba(13,148,136,0.34),transparent_36%),linear-gradient(45deg,rgba(251,191,36,0.18),transparent_32%),linear-gradient(180deg,#07100f_0%,#0d1714_46%,#101114_100%)]" />
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.11)_1px,transparent_0)] bg-[length:26px_26px] opacity-35" />
 
-          <div>
-            <h2 className="text-3xl font-bold">Your Keeper Dashboard</h2>
-            <p className="text-neutral-400">Create, manage, and reorder recurring tasks with instant feedback.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={syncTasks}
-              className="rounded-lg border border-neutral-700/80 bg-neutral-800/80 px-4 py-2 text-sm text-neutral-200 transition hover:border-neutral-500"
-            >
-              {isLoading ? 'Refreshing…' : 'Refresh tasks'}
-            </button>
-            <div className="text-sm text-neutral-400">{activeTaskCount} active tasks</div>
-          </div>
-        </div>
-
-        {globalError ? (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 mb-6">
-            {globalError}
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-12 xl:grid-cols-[1.1fr_1fr]">
-          <section className="space-y-6">
-            <h2 className="text-2xl font-bold">Create Automation Task</h2>
-            <form onSubmit={handleSubmit} className="bg-neutral-800/50 border border-neutral-700/50 rounded-xl p-6 space-y-4 shadow-xl">
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Target Contract Address</label>
-                <input 
-                  type="text" 
-                  placeholder="C..." 
-                  value={taskData.contractAddress}
-                  onChange={(e) => setTaskData(prev => ({ ...prev, contractAddress: e.target.value }))}
-                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Function Name</label>
-                <input 
-                  type="text" 
-                  placeholder="harvest_yield" 
-                  value={taskData.functionName}
-                  onChange={(e) => setTaskData(prev => ({ ...prev, functionName: e.target.value }))}
-                  className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                  <input 
-                    type="number" 
-                    placeholder="3600" 
-                    value={taskData.interval}
-                    onChange={(e) => setTaskData(prev => ({ ...prev, interval: e.target.value }))}
-                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                  <input 
-                    type="number" 
-                    placeholder="10" 
-                    value={taskData.gasBalance}
-                    onChange={(e) => setTaskData(prev => ({ ...prev, gasBalance: e.target.value }))}
-                    className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
-                  />
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="use-vrf"
-                    checked={taskData.useVrf}
-                    onChange={(e) => setTaskData(prev => ({ ...prev, useVrf: e.target.checked }))}
-                    className="h-4 w-4 text-blue-600 border-neutral-600 rounded focus:ring-blue-500"
-                  />
-                  <label htmlFor="use-vrf" className="ml-2 block text-sm font-medium text-neutral-400">
-                    Use Verifiable Random Function (VRF)
-                  </label>
-                </div>
-                {taskData.useVrf && (
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-neutral-400 mb-1">VRF Callback Function</label>
-                      <input 
-                        type="text" 
-                        placeholder="fulfillRandomness" 
-                        value={taskData.vrfCallbackFunction}
-                        onChange={(e) => setTaskData(prev => ({ ...prev, vrfCallbackFunction: e.target.value }))}
-                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-neutral-400 mb-1">VRF Callback Arguments (JSON)</label>
-                      <textarea 
-                        placeholder='{"randomNumber": "$RANDOM"}'
-                        value={taskData.vrfCallbackArgs}
-                        onChange={(e) => setTaskData(prev => ({ ...prev, vrfCallbackArgs: e.target.value }))}
-                        className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm h-24" 
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1">Interval (seconds)</label>
-                    <input type="number" placeholder="3600" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm touch-manipulation" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1">Gas Balance (XLM)</label>
-                    <input type="number" placeholder="10" className="w-full bg-neutral-900 border border-neutral-700/50 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono text-sm touch-manipulation" />
-                  </div>
-                </div>
-                <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20 touch-manipulation">
-                  Register Task
-                </button>
-              </div>
-              
-              {/* Natural Language Due Date Input */}
-              <DateInput
-                value={taskData.dueDate}
-                onChange={handleDateChange}
-                label="Due Date"
-                required={false}
-                className="mt-4"
-              />
-              
-              <button 
-                type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors mt-2 shadow-lg shadow-blue-600/20"
-              >
-                Register Task
-              </button>
-            </form>
-          </section>
-
-          <section className="space-y-6">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-2xl font-bold">Your Tasks</h3>
-              <span className="rounded-full border border-neutral-700/70 bg-neutral-950/60 px-3 py-1 text-xs text-neutral-300">
-                {tasks.length} total
+        <nav className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 rounded-full border border-white/10 bg-white/[0.06] px-4 py-3 shadow-2xl shadow-black/20 backdrop-blur">
+          <Link
+            href="/"
+            className="flex items-center gap-3"
+            aria-label="SoroTask home"
+          >
+            <span className="flex size-10 items-center justify-center rounded-full bg-emerald-300 text-lg font-black text-slate-950">
+              S
+            </span>
+            <span>
+              <span className="block text-sm font-semibold uppercase tracking-[0.28em] text-emerald-100">
+                SoroTask
               </span>
-            </div>
-            <div className="overflow-hidden rounded-3xl border border-neutral-700/50 bg-neutral-900/80 shadow-xl">
-              <table className="min-w-full text-left text-sm text-neutral-200">
-                <thead className="border-b border-neutral-800 bg-neutral-950/90 text-neutral-300">
-                  <tr>
-                    <th className="px-5 py-4">Task</th>
-                    <th className="px-5 py-4">Interval</th>
-                    <th className="px-5 py-4">Balance</th>
-                    <th className="px-5 py-4">Status</th>
-                    <th className="px-5 py-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800 bg-neutral-900">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-8 text-center text-neutral-400">
-                        Loading tasks…
-                      </td>
-                    </tr>
-                  ) : tasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-8 text-center text-neutral-500">
-                        No tasks registered yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    tasks.map((task, index) => {
-                      const status = taskStatus[task.id]
-                      const isPending = status?.pending ?? false
-                      const errorText = status?.error
-                      const isEditing = editingTaskId === task.id
-
-                      return (
-                        <tr
-                          key={task.id}
-                          className={isPending ? 'bg-blue-500/10' : 'hover:bg-neutral-800/50 transition-colors'}
-                        >
-                          <td className="px-5 py-4">
-                            <div className="font-medium text-white">{task.func}</div>
-                            <div className="mt-1 text-xs text-neutral-400 font-mono">{task.target}</div>
-                          </td>
-                          <td className="px-5 py-4">
-                            {isEditing ? (
-                              <input
-                                value={editDraft.interval}
-                                onChange={(event) => setEditDraft((current) => ({ ...current, interval: event.target.value }))}
-                                type="number"
-                                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                              />
-                            ) : (
-                              <span className="font-mono text-neutral-300">{task.interval}s</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            {isEditing ? (
-                              <input
-                                value={editDraft.balance}
-                                onChange={(event) => setEditDraft((current) => ({ ...current, balance: event.target.value }))}
-                                type="number"
-                                className="w-full rounded-lg border border-neutral-700/70 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-                              />
-                            ) : (
-                              <span className="font-mono text-neutral-300">{task.balance} XLM</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            <span
-                              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                                isPending
-                                  ? 'bg-blue-500/15 text-blue-200 ring-1 ring-blue-500/25'
-                                  : 'bg-green-500/10 text-green-300 ring-1 ring-green-500/25'
-                              }`}
-                            >
-                              {isPending ? 'Pending' : 'Active'}
-                            </span>
-                            {errorText ? (
-                              <div className="mt-2 text-xs text-red-300">{errorText}</div>
-                            ) : null}
-                          </td>
-                          <td className="px-5 py-4 space-y-2">
-                            {isEditing ? (
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => applyEdit(task)}
-                                  disabled={isPending}
-                                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingTaskId(null)}
-                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => buildDraft(task)}
-                                  disabled={isPending}
-                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteTask(task.id)}
-                                  disabled={isPending}
-                                  className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-60"
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveTask(task.id, -1)}
-                                  disabled={isPending || index === 0}
-                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500 disabled:opacity-40"
-                                >
-                                  Up
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveTask(task.id, 1)}
-                                  disabled={isPending || index === tasks.length - 1}
-                                  className="rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-200 transition hover:border-neutral-500 disabled:opacity-40"
-                                >
-                                  Down
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-
-        <section className="mt-16 space-y-6">
-          <h3 className="text-2xl font-bold">Execution Logs</h3>
-          <div className="overflow-hidden rounded-xl border border-neutral-700/50 shadow-xl">
-            <table className="w-full text-left text-sm text-neutral-400">
-              <thead className="bg-neutral-800 text-neutral-200">
-                <tr>
-                  <th className="px-6 py-4">Task ID</th>
-                  <th className="px-6 py-4">Target</th>
-                  <th className="px-6 py-4">Keeper</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Timestamp</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-neutral-800 bg-neutral-900/50">
-                <tr className="hover:bg-neutral-800/50 transition-colors">
-                  <td className="px-6 py-4 font-mono text-neutral-300">
-                    #1024
-                  </td>
-                  <td className="px-6 py-4 font-mono">CC...A12B</td>
-                  <td className="px-6 py-4 font-mono">GA...99X</td>
-                  <td className="px-6 py-4">
-                    <TransactionStatus status="success" compact />
-                  </td>
-                  <td className="px-6 py-4">
-                    <a href={`${STELLAR_EXPERT_BASE}/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="font-mono text-blue-400 hover:text-blue-300 underline transition-colors">
-                      a1b2c3d4…a1b2
-                    </a>
-                  </td>
-                  <td className="px-6 py-4">2 mins ago</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <button className="p-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-yellow-500 transition-colors border border-neutral-700" title="Pause">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      </button>
-                      <button className="p-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-red-500 transition-colors border border-neutral-700" title="Delete">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div ref={logsEndRef} />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="edit-interval" className="block text-sm font-medium text-neutral-400 mb-1">
-                Interval (seconds)
-              </label>
-              <input
-                id="edit-interval"
-                type="number"
-                min={1}
-                value={form.interval}
-                onChange={(event) => setForm({ ...form, interval: event.target.value })}
-                required
-                className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-              />
-            </div>
-            <div>
-              <label htmlFor="edit-gas" className="block text-sm font-medium text-neutral-400 mb-1">
-                Gas Balance (XLM)
-              </label>
-              <input
-                id="edit-gas"
-                type="number"
-                min={0}
-                value={form.gasBalance}
-                onChange={(event) => setForm({ ...form, gasBalance: event.target.value })}
-                required
-                className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={handleCancel}
-              className="rounded-2xl border border-neutral-700/80 bg-neutral-900 px-4 py-3 text-sm font-medium text-neutral-200 transition hover:border-neutral-500"
+              <span className="block text-xs text-slate-400">
+                Automation command center
+              </span>
+            </span>
+          </Link>
+          <div className="hidden items-center gap-2 text-sm text-slate-300 md:flex">
+            <Link
+              className="rounded-full px-3 py-2 transition hover:bg-white/10 hover:text-white"
+              href="/dashboard"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-500"
+              Dashboard
+            </Link>
+            <Link
+              className="rounded-full px-3 py-2 transition hover:bg-white/10 hover:text-white"
+              href="/marketplace"
             >
-              Save Changes
-            </button>
+              Marketplace
+            </Link>
+            <Link
+              className="rounded-full px-3 py-2 transition hover:bg-white/10 hover:text-white"
+              href="/settings"
+            >
+              Settings
+            </Link>
           </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+          <Link
+            href="/tasks"
+            className="inline-flex items-center gap-2 rounded-full bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-200"
+          >
+            Launch
+            <FiArrowRight aria-hidden="true" />
+          </Link>
+        </nav>
 
-interface TaskCardProps {
-  task: Task;
-  onEdit: (task: Task) => void;
-  onToggle: (id: number) => void;
-  onDelete: (id: number) => void;
-}
-
-function TaskCard({ task, onEdit, onToggle, onDelete }: TaskCardProps) {
-  const isPaused = task.status === "paused";
-
-  return (
-    <article
-      aria-label={`Automation task ${task.id}: ${task.functionName} on ${task.contractAddress}`}
-      className="rounded-3xl border border-neutral-700/80 bg-neutral-900/70 p-5 shadow-xl shadow-black/20"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">Task #{task.id}</p>
-          <p className="font-mono text-sm text-neutral-300 truncate max-w-[18rem]">{task.contractAddress}</p>
-          <p className="text-base font-semibold text-neutral-100">{task.functionName}</p>
-        </div>
-        <span
-          role="status"
-          aria-label={`Task status: ${task.status}`}
-          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-            isPaused
-              ? "bg-yellow-500/10 text-yellow-300 border border-yellow-500/20"
-              : "bg-green-500/10 text-green-300 border border-green-500/20"
-          }`}
-        >
-          {isPaused ? "Paused" : "Active"}
-        </span>
-      </div>
-
-      <dl className="mt-4 grid gap-3 text-sm text-neutral-400">
-        <div>
-          <dt className="sr-only">Interval</dt>
-          <dd>Every {task.interval}s</dd>
-        </div>
-        <div>
-          <dt className="sr-only">Gas balance</dt>
-          <dd>{task.gasBalance} XLM</dd>
-        </div>
-      </dl>
-
-      <div role="group" aria-label={`Actions for task ${task.id}`} className="mt-5 grid gap-2 sm:grid-cols-3">
-        <button
-          type="button"
-          onClick={() => onEdit(task)}
-          aria-label={`Edit task ${task.id}`}
-          className="rounded-2xl bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={() => onToggle(task.id)}
-          aria-label={isPaused ? `Resume task ${task.id}` : `Pause task ${task.id}`}
-          aria-pressed={isPaused}
-          className="rounded-2xl bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
-        >
-          {isPaused ? "Resume" : "Pause"}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(task.id)}
-          aria-label={`Delete task ${task.id}`}
-          className="rounded-2xl bg-red-600/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-600/20"
-        >
-          Delete
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function LiveRegion({ message }: { message: string }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      className="sr-only"
-    >
-      {message}
-    </div>
-  );
-}
-
-export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [announcement, setAnnouncement] = useState("");
-  const [contractAddress, setContractAddress] = useState("");
-  const [functionName, setFunctionName] = useState("");
-  const [interval, setInterval] = useState("");
-  const [gasBalance, setGasBalance] = useState("");
-  const [formError, setFormError] = useState("");
-  const [criticalWarningAcknowledged, setCriticalWarningAcknowledged] = useState(false);
-  const nextTaskId = useRef(1);
-
-  const predictionInput = useMemo(
-    () => ({
-      contractAddress: contractAddress.trim(),
-      functionName: functionName.trim(),
-      interval: Number(interval),
-      gasBalance: Number(gasBalance),
-    }),
-    [contractAddress, functionName, interval, gasBalance]
-  );
-
-  const analysis = usePredictiveFailureAnalysis(predictionInput);
-
-  const announce = useCallback((message: string) => {
-    setAnnouncement("");
-    requestAnimationFrame(() => setAnnouncement(message));
-  }, []);
-
-  const resetForm = () => {
-    setContractAddress("");
-    setFunctionName("");
-    setInterval("");
-    setGasBalance("");
-    setFormError("");
-    setCriticalWarningAcknowledged(false);
-  };
-
-  const handleRegister = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      setFormError("");
-
-      if (!contractAddress.trim() || !functionName.trim()) {
-        setFormError("Contract address and function name are required.");
-        return;
-      }
-
-      if (Number(interval) < 1) {
-        setFormError("Interval must be at least 1 second.");
-        return;
-      }
-
-      if (Number(gasBalance) < 0) {
-        setFormError("Gas balance cannot be negative.");
-        return;
-      }
-
-      if (analysis.status === "success" && analysis.prediction?.riskLevel === "critical") {
-        if (!criticalWarningAcknowledged) {
-          setFormError(
-            "This configuration is predicted to fail critically. Submit again to register with caution."
-          );
-          setCriticalWarningAcknowledged(true);
-          return;
-        }
-      }
-
-      const newTask: Task = {
-        id: nextTaskId.current++,
-        contractAddress: contractAddress.trim(),
-        functionName: functionName.trim(),
-        interval: Number(interval) || 3600,
-        gasBalance: Number(gasBalance) || 10,
-        status: "active",
-      };
-
-      setTasks((current) => [newTask, ...current]);
-      announce(`Task ${newTask.id} registered for ${newTask.functionName}.`);
-      resetForm();
-    },
-    [analysis.prediction?.riskLevel, analysis.status, criticalWarningAcknowledged, contractAddress, functionName, interval, gasBalance, announce]
-  );
-
-  const handleSaveEdit = useCallback(
-    (updatedTask: Task) => {
-      setTasks((current) => current.map((candidate) => (candidate.id === updatedTask.id ? updatedTask : candidate)));
-      setEditingTask(null);
-      announce(`Task ${updatedTask.id} updated.`);
-    },
-    [announce]
-  );
-
-  const handleToggle = useCallback(
-    (taskId: number) => {
-      setTasks((current) =>
-        current.map((task) =>
-          task.id === taskId
-            ? { ...task, status: task.status === "active" ? "paused" : "active" }
-            : task
-        )
-      );
-      announce(`Task ${taskId} ${tasks.find((task) => task.id === taskId)?.status === "active" ? "paused" : "resumed"}.`);
-    },
-    [tasks, announce]
-  );
-
-  const handleDelete = useCallback(
-    (taskId: number) => {
-      setTasks((current) => current.filter((task) => task.id !== taskId));
-      announce(`Task ${taskId} deleted.`);
-    },
-    [announce]
-  );
-
-  return (
-    <>
-      <a href="#main-content" className="skip-nav">
-        Skip to main content
-      </a>
-
-      <LiveRegion message={announcement} />
-
-      {editingTask && (
-        <EditTaskDialog
-          task={editingTask}
-          onSave={handleSaveEdit}
-          onClose={() => setEditingTask(null)}
-        />
-      )}
-
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans">
-        <header className="sticky top-0 z-10 border-b border-neutral-800/70 bg-neutral-950/95 backdrop-blur-lg">
-          <div className="container mx-auto flex flex-wrap items-center justify-between gap-4 px-6 py-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500 text-lg font-bold text-white">
-                S
-              </div>
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight">SoroTask</h1>
-                <p className="text-sm text-neutral-400">Predict task failure risk before registration.</p>
-              </div>
+        <div className="mx-auto grid w-full max-w-7xl gap-10 pb-16 pt-14 lg:grid-cols-[1.02fr_0.98fr] lg:items-center lg:pb-20 lg:pt-20">
+          <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-sm font-medium text-emerald-100">
+              <FiZap aria-hidden="true" />
+              MVP-ready automation control for Soroban teams
             </div>
-            <button
-              id="connect-wallet-btn"
-              aria-label="Connect your Stellar wallet"
-              className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold text-neutral-100 transition hover:bg-neutral-800"
-            >
-              {isWalletConnected ? `${walletAddress?.slice(0, 6)}...${walletAddress?.slice(-4)}` : "Connect Wallet"}
-            </button>
-          </div>
-        </header>
 
-        <main id="main-content" className="container mx-auto px-6 py-12">
-          <div className="grid gap-12 xl:grid-cols-[1.2fr_0.9fr]">
-            <section aria-labelledby="create-task-heading" className="space-y-6">
-              <div className="space-y-2">
-                <p className="text-sm uppercase tracking-[0.24em] text-blue-400">Predictive Execution</p>
-                <h2 id="create-task-heading" className="text-3xl font-semibold text-white">
-                  Create automation task
-                </h2>
-              </div>
+            <h1 className="mt-7 max-w-4xl text-5xl font-black leading-[0.95] text-white sm:text-6xl lg:text-7xl">
+              Run onchain tasks without watching the clock.
+            </h1>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+              SoroTask gives teams one sharp surface to schedule contract calls,
+              fund execution, monitor keepers, and catch failed workflows before
+              they become expensive.
+            </p>
 
-              <div className="rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-6 shadow-xl shadow-black/20">
-                <form onSubmit={handleRegister} noValidate className="space-y-6" aria-describedby={formError ? "task-form-error" : undefined}>
-                  {formError && (
-                    <div
-                      id="task-form-error"
-                      role="alert"
-                      className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"
-                    >
-                      {formError}
-                    </div>
-                  )}
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/tasks"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-300 px-6 py-3 text-base font-bold text-slate-950 shadow-xl shadow-emerald-950/30 transition hover:-translate-y-0.5 hover:bg-emerald-200"
+              >
+                Create automation
+                <FiArrowRight aria-hidden="true" />
+              </Link>
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-6 py-3 text-base font-semibold text-white backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/15"
+              >
+                View live dashboard
+                <FiActivity aria-hidden="true" />
+              </Link>
+            </div>
 
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor="contract-address" className="block text-sm font-medium text-neutral-400 mb-1">
-                        Target Contract Address
-                      </label>
-                      <input
-                        id="contract-address"
-                        type="text"
-                        value={contractAddress}
-                        onChange={(event) => setContractAddress(event.target.value)}
-                        placeholder="C..."
-                        autoComplete="off"
-                        required
-                        className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="function-name" className="block text-sm font-medium text-neutral-400 mb-1">
-                        Function Name
-                      </label>
-                      <input
-                        id="function-name"
-                        type="text"
-                        value={functionName}
-                        onChange={(event) => setFunctionName(event.target.value)}
-                        placeholder="harvest_yield"
-                        autoComplete="off"
-                        required
-                        className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="interval-seconds" className="block text-sm font-medium text-neutral-400 mb-1">
-                          Interval (seconds)
-                        </label>
-                        <input
-                          id="interval-seconds"
-                          type="number"
-                          min={1}
-                          value={interval}
-                          onChange={(event) => setInterval(event.target.value)}
-                          placeholder="3600"
-                          className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="gas-balance" className="block text-sm font-medium text-neutral-400 mb-1">
-                          Gas Balance (XLM)
-                        </label>
-                        <input
-                          id="gas-balance"
-                          type="number"
-                          min={0}
-                          value={gasBalance}
-                          onChange={(event) => setGasBalance(event.target.value)}
-                          placeholder="10"
-                          className="w-full rounded-2xl border border-neutral-700/80 bg-neutral-950 px-4 py-3 text-sm text-neutral-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <PredictiveFailureAnalysisPanel
-                    status={analysis.status}
-                    prediction={analysis.prediction}
-                    error={analysis.error}
-                  />
-
-                  <button
-                    type="submit"
-                    className="w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
-                  >
-                    Register Task
-                  </button>
-                </form>
-              </div>
-            </section>
-
-            <section aria-labelledby="your-tasks-heading" className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 id="your-tasks-heading" className="text-3xl font-semibold text-white">
-                    Your tasks
-                  </h2>
-                  <p className="text-sm text-neutral-400">Tasks are validated before registration and shown in one place.</p>
+            <div className="mt-10 grid gap-3 sm:grid-cols-3">
+              {stats.map((stat) => (
+                <div
+                  key={stat.label}
+                  className="border-l border-white/15 bg-white/[0.04] px-4 py-3"
+                >
+                  <p className={`text-2xl font-black ${stat.tone}`}>
+                    {stat.value}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-400">{stat.label}</p>
                 </div>
-                <span className="rounded-full border border-neutral-700/80 bg-neutral-900/70 px-3 py-2 text-sm text-neutral-300">
-                  {tasks.length} total
+              ))}
+            </div>
+          </div>
+
+          <div className="relative">
+            <div className="rounded-[2rem] border border-white/10 bg-slate-950/72 p-4 shadow-2xl shadow-black/40 backdrop-blur-xl">
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div>
+                  <p className="text-sm font-semibold text-emerald-200">
+                    Execution stream
+                  </p>
+                  <h2 className="mt-1 text-2xl font-black text-white">
+                    Keeper cockpit
+                  </h2>
+                </div>
+                <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                  Live
                 </span>
               </div>
 
-              {tasks.length === 0 ? (
-                <div aria-live="polite" className="rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-8 text-center text-neutral-500">
-                  <p className="text-base font-medium">No tasks registered yet.</p>
-                  <p className="mt-2 text-sm text-neutral-400">Fill the form to see predictive execution warnings before registration.</p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-emerald-300 p-4 text-slate-950">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em]">
+                    Balance
+                  </p>
+                  <p className="mt-3 text-3xl font-black">842 XLM</p>
                 </div>
-              ) : (
-                <ul aria-label="Registered automation tasks" className="space-y-4">
-                  {tasks.map((task) => (
-                    <li key={task.id}>
-                      <TaskCard task={task} onEdit={setEditingTask} onToggle={handleToggle} onDelete={handleDelete} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Retries
+                  </p>
+                  <p className="mt-3 text-3xl font-black text-white">03</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Risk
+                  </p>
+                  <p className="mt-3 text-3xl font-black text-amber-300">Low</p>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {commandRows.map((row) => (
+                  <div
+                    key={row.name}
+                    className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.055] p-4 sm:grid-cols-[1fr_auto_auto] sm:items-center"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`size-3 rounded-full ${row.tone}`} />
+                      <div>
+                        <p className="font-semibold text-white">{row.name}</p>
+                        <p className="text-sm text-slate-400">{row.network}</p>
+                      </div>
+                    </div>
+                    <span className="w-fit rounded-full bg-white/10 px-3 py-1 text-sm font-medium text-slate-200">
+                      {row.status}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-300">
+                      ETA {row.eta}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mx-auto grid w-full max-w-7xl gap-4 pb-16 md:grid-cols-3">
+          {trustSignals.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 border-t border-white/10 pt-5 text-slate-300"
+              >
+                <span className="flex size-10 items-center justify-center rounded-full bg-white/10 text-emerald-200">
+                  <Icon aria-hidden="true" />
+                </span>
+                <span className="font-medium">{item.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="bg-[#f4f1e8] px-5 py-16 text-slate-950 sm:px-8 lg:px-12">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.28em] text-teal-700">
+                Operate faster
+              </p>
+              <h2 className="mt-3 max-w-2xl text-4xl font-black leading-tight sm:text-5xl">
+                Everything an MVP demo needs on the first screen.
+              </h2>
+            </div>
+            <p className="max-w-xl text-base leading-7 text-slate-600">
+              These routes turn the homepage from a blank entry point into a
+              guided product hub, so users immediately know where to create,
+              monitor, and debug automations.
+            </p>
           </div>
 
-          <section className="mt-16 rounded-3xl border border-neutral-800/80 bg-neutral-900/70 p-6 shadow-xl shadow-black/10">
-            <h2 className="text-2xl font-semibold text-white">Execution logs</h2>
-            <p className="mt-1 text-sm text-neutral-400">A small example audit trail for simulated task execution outcomes.</p>
+          <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {quickLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                >
+                  <span
+                    className={`flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br ${link.accent} text-xl text-slate-950 shadow-lg`}
+                  >
+                    <Icon aria-hidden="true" />
+                  </span>
+                  <h3 className="mt-6 text-xl font-black">{link.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    {link.description}
+                  </p>
+                  <span className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-teal-700">
+                    Open workspace
+                    <FiArrowRight
+                      className="transition group-hover:translate-x-1"
+                      aria-hidden="true"
+                    />
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
 
-            <div className="mt-6 overflow-x-auto">
-              <table className="min-w-full border-separate border-spacing-0 text-left text-sm text-neutral-300">
-                <caption className="sr-only">Recent task execution logs.</caption>
-                <thead>
-                  <tr className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                    <th className="px-4 py-3">Task ID</th>
-                    <th className="px-4 py-3">Keeper</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">When</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800 border-t border-neutral-800">
-                  {MOCK_LOGS.map((entry) => (
-                    <tr key={entry.id} className="odd:bg-neutral-950 even:bg-neutral-900">
-                      <td className="px-4 py-3 font-mono text-neutral-200">#{entry.taskId}</td>
-                      <td className="px-4 py-3 text-neutral-300">{entry.keeper}</td>
-                      <td className="px-4 py-3 text-neutral-200">{entry.status}</td>
-                      <td className="px-4 py-3 text-neutral-400">{entry.timestamp}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="mt-10 grid gap-4 rounded-[2rem] bg-slate-950 p-5 text-white shadow-2xl shadow-slate-300/40 lg:grid-cols-[0.75fr_1.25fr] lg:p-7">
+            <div className="flex flex-col justify-between gap-8">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.24em] text-amber-200">
+                  Launch checklist
+                </p>
+                <h3 className="mt-3 text-3xl font-black">
+                  Built to show momentum.
+                </h3>
+                <p className="mt-4 leading-7 text-slate-300">
+                  A stronger homepage helps your MVP feel intentional while the
+                  deeper product screens continue doing the actual work.
+                </p>
+              </div>
+              <Link
+                href="/template-builder"
+                className="inline-flex w-fit items-center gap-2 rounded-full bg-amber-300 px-5 py-3 font-bold text-slate-950 transition hover:bg-amber-200"
+              >
+                Build a template
+                <FiArrowRight aria-hidden="true" />
+              </Link>
             </div>
-          </section>
-        </main>
-      </div>
-    </>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {["Connect wallet", "Register task", "Watch execution"].map(
+                (step, index) => (
+                  <div
+                    key={step}
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] p-5"
+                  >
+                    <FiCheckCircle
+                      className="text-2xl text-emerald-300"
+                      aria-hidden="true"
+                    />
+                    <p className="mt-6 text-sm font-bold uppercase tracking-[0.2em] text-slate-400">
+                      Step {index + 1}
+                    </p>
+                    <p className="mt-2 text-xl font-black">{step}</p>
+                  </div>
+                ),
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }
