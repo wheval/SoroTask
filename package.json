@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "bundle:audit": "tsx scripts/bundle-audit.ts"
   },
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^17.0.7",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "tsx": "npm:tsx@latest"
   }
 }
