@@ -12,7 +12,10 @@
     "test:watch": "jest --watch",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "upload-sourcemaps": "node scripts/upload-sourcemaps.js"
+    "upload-sourcemaps": "node scripts/upload-sourcemaps.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
     "@sentry/nextjs": "^8.0.0",
