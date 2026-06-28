@@ -1,5 +1,7 @@
 "use client";
 
+import { TaskExecutionHeatmapEngine } from '@/src/components/TaskExecutionHeatmapEngine';
+
 import { useEffect, useMemo, useState } from "react";
 
 type WidgetStatus = "loading" | "empty" | "error" | "success";
@@ -74,6 +76,32 @@ const widgetRegistry: Record<string, WidgetDefinition> = {
       <p className="text-sm text-slate-300">
         Alert stream is temporarily unavailable. Retry shortly.
       </p>
+    ),
+  },
+  executionHeatmap: {
+    id: "executionHeatmap",
+    title: "Execution Success Rate",
+    description: "Heatmap of task execution success rates across all active tasks.",
+    defaultSize: "large",
+    getStatus: () => "success" as const,
+    render: () => (
+      <TaskExecutionHeatmapEngine
+        fetchData={() =>
+          Promise.resolve({
+            periodLabel: "Last 7 days",
+            fetchedAt: new Date().toISOString(),
+            cells: [
+              { id: "harvest", label: "Harvest", successRate: 98, totalExecutions: 200, status: "success" as const },
+              { id: "rebalance", label: "Rebalance", successRate: 72, totalExecutions: 50, status: "warning" as const },
+              { id: "rotate", label: "Rotate", successRate: 40, totalExecutions: 30, status: "failure" as const },
+              { id: "topup", label: "Top-up", successRate: 91, totalExecutions: 120, status: "success" as const },
+              { id: "pause", label: "Pause", successRate: 0, totalExecutions: 0, status: "empty" as const },
+            ],
+          })
+        }
+        maxRetries={3}
+        retryDelayMs={500}
+      />
     ),
   },
 };
