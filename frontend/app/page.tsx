@@ -11,6 +11,7 @@ import {
   FiPlayCircle,
   FiShield,
   FiZap,
+  FiTrendingUp,
 } from "react-icons/fi";
 
 const stats = [
@@ -72,6 +73,34 @@ const quickLinks = [
     description: "Monitor nodes, gas pressure, retries, and operational risk.",
     icon: FiCpu,
     accent: "from-rose-400 to-red-300",
+  },
+  {
+    href: "/tokenomics",
+    title: "Tokenomics Flow",
+    description: "Model distribution flows, cycles, and pools inside the network.",
+    icon: FiLayers,
+    accent: "from-emerald-300 to-teal-400",
+  },
+  {
+    href: "/yield-calculator",
+    title: "Yield Forecaster",
+    description: "Forecast simple vs compounded yields post keeper execution fees.",
+    icon: FiTrendingUp,
+    accent: "from-sky-300 to-indigo-400",
+  },
+  {
+    href: "/gas-optimization",
+    title: "Gas Optimization",
+    description: "Estimate transaction costs, schedule off-peak, and simulate runs.",
+    icon: FiZap,
+    accent: "from-amber-200 to-orange-400",
+  },
+  {
+    href: "/tracing",
+    title: "Distributed Tracing",
+    description: "Timeline waterfall diagnostics across services & block consensus.",
+    icon: FiActivity,
+    accent: "from-purple-400 to-rose-400",
   },
 ];
 

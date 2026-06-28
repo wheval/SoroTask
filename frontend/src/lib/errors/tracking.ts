@@ -440,3 +440,7 @@ export function trackSync<T>(
     throw err;
   }
 }
+
+export function captureSentryException(error: Error, context?: Record<string, unknown>) {
+  Sentry.captureSentryException(error, context);
+}

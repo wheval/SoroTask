@@ -132,4 +132,9 @@ export function setSentryContext(key: string, context: Record<string, unknown>) 
   Sentry.setContext(key, context);
 }
 
+export function setContext(key: string, context: Record<string, unknown>) {
+  if (!isEnabled) return;
+  Sentry.setContext(key, context);
+}
+
 export default Sentry;
