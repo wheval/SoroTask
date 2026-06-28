@@ -1,8 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const nextJest = require('next/jest')
 
-// next/jest returns a function that wraps your Jest config with Next.js defaults.
-// The wrapper itself is synchronous in Next.js 16 — no need for async/await.
 const createJestConfig = nextJest({
   dir: './',
 })
@@ -26,10 +24,10 @@ const customConfig = {
   ],
   coverageThreshold: {
     global: {
-      branches: 70,
-      functions: 70,
-      lines: 70,
-      statements: 70,
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
     },
   },
   testMatch: [
@@ -40,6 +38,23 @@ const customConfig = {
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+  },
+  transform: {
+    '^.+\\.(ts|tsx)$': ['ts-jest', {
+      tsconfig: {
+        target: 'ES2022',
+        module: 'commonjs',
+        lib: ['dom', 'dom.iterable', 'esnext'],
+        allowJs: true,
+        skipLibCheck: true,
+        strict: true,
+        esModuleInterop: true,
+        moduleResolution: 'bundler',
+        resolveJsonModule: true,
+        isolatedModules: false,
+        jsx: 'react-jsx',
+      },
+    }],
   },
 };
 
