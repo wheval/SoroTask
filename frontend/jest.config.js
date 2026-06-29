@@ -48,23 +48,6 @@ const customConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  transform: {
-    '^.+\\.(ts|tsx)$': ['ts-jest', {
-      tsconfig: {
-        target: 'ES2022',
-        module: 'commonjs',
-        lib: ['dom', 'dom.iterable', 'esnext'],
-        allowJs: true,
-        skipLibCheck: true,
-        strict: true,
-        esModuleInterop: true,
-        moduleResolution: 'bundler',
-        resolveJsonModule: true,
-        isolatedModules: false,
-        jsx: 'react-jsx',
-      },
-    }],
-  },
 };
 
 module.exports = createJestConfig(customConfig);
