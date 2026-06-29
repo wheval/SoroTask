@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { CommandPalette } from "@/components/CommandPalette";
 import { AppProviders } from "@/app/components/AppProviders";
+import { AIAssistantProvider } from "@/components/AIAssistant";
 
 export const metadata: Metadata = {
   title: "SoroTask Frontend Performance Monitoring",
@@ -35,7 +36,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <CommandPalette />
-        {children}
+        <AIAssistantProvider>
+          <AppProviders>
+            {children}
+          </AppProviders>
+        </AIAssistantProvider>
         {/* Initialize Sentry and fetch instrumentation on client */}
         <ClientInit />
       </body>
